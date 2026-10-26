@@ -19,19 +19,24 @@ namespace Waribasi.Rules.Tests
             AssertRejected(engine, firstPlayer, new AttackAction(HandSide.Left, HandSide.Right),
                 ActionRejection.MatchNotActive);
 
-            var result = engine.TryStart(0);
+            //変更:先手確定後に配布し、その後で操作受付を開始する。
+            Assert.That(engine.TryStart(0).Rejection, Is.EqualTo(ActionRejection.InitialCardsNotDealt));
+            Assert.That(engine.TryDealInitialCards(0).Accepted, Is.True);
+            var result = engine.TryStart(1);
 
             Assert.That(result.Accepted, Is.True);
             Assert.That(result.State.CurrentPlayer, Is.EqualTo(firstPlayer));
             Assert.That(result.State.TurnNumber, Is.EqualTo(1));
-            Assert.That(result.State.StateVersion, Is.EqualTo(1));
+            //変更:配布と開始がそれぞれ一度ずつ版を進める。
+            Assert.That(result.State.StateVersion, Is.EqualTo(2));
             Assert.That(result.State.TurnPhase, Is.EqualTo(TurnPhase.CardOrNormalAction));
             Assert.That(result.Events.Select(e => e.Type), Is.EqualTo(new[]
             {
                 RuleEventType.MatchStarted, RuleEventType.TurnChanged
             }));
             Assert.That(preparing.MatchPhase, Is.EqualTo(MatchPhase.Preparing));
-            Assert.That(engine.TryStart(1).Accepted, Is.False);
+            //変更:最新の版でも二重開始は拒否する。
+            Assert.That(engine.TryStart(2).Accepted, Is.False);
         }
 
         [TestCase(1, 1, 2)]

@@ -1,4 +1,6 @@
 using System;
+//追加:公開履歴を変更不能な一覧として保持する。
+using System.Collections.Generic;
 
 namespace Waribasi.Rules
 {
@@ -101,9 +103,21 @@ namespace Waribasi.Rules
         public PlayerId? Loser => Winner.HasValue ? GetOpponent(Winner.Value) : (PlayerId?)null;
         public MatchEndReason EndReason { get; }
 
+        //追加:公開情報には実手札や復活札の未公開入手状況を含めない。
+        public PlayerEffects PlayerAEffects { get; }
+        public PlayerEffects PlayerBEffects { get; }
+        public int PlayerACardCount { get; }
+        public int PlayerBCardCount { get; }
+        public bool InitialCardsDealt { get; }
+        public IReadOnlyList<CardUseRecord> CardHistory { get; }
+
         internal GameState(PlayerHands playerA, PlayerHands playerB, PlayerId currentPlayer,
             MatchPhase matchPhase, TurnPhase turnPhase, long turnNumber, long stateVersion,
-            PlayerId? winner = null, MatchEndReason endReason = MatchEndReason.None)
+            //変更:公開効果・枚数・履歴を盤面と同じ版に固定する。
+            PlayerId? winner = null, MatchEndReason endReason = MatchEndReason.None,
+            PlayerEffects playerAEffects = default, PlayerEffects playerBEffects = default,
+            int playerACardCount = 0, int playerBCardCount = 0,
+            IEnumerable<CardUseRecord> cardHistory = null, bool initialCardsDealt = false)
         {
             PlayerA = playerA;
             PlayerB = playerB;
@@ -114,6 +128,34 @@ namespace Waribasi.Rules
             StateVersion = stateVersion;
             Winner = winner;
             EndReason = endReason;
+            //追加:外部から渡された履歴も複製して読み取り専用にする。
+            PlayerAEffects = playerAEffects;
+            PlayerBEffects = playerBEffects;
+            PlayerACardCount = playerACardCount;
+            PlayerBCardCount = playerBCardCount;
+            CardHistory = new List<CardUseRecord>(cardHistory ?? Array.Empty<CardUseRecord>()).AsReadOnly();
+            InitialCardsDealt = initialCardsDealt;
+        }
+
+        //追加:公開状態の左右効果・手札枚数を席から読み取る。
+        public PlayerEffects GetEffects(PlayerId player)
+        {
+            if (!IsValidPlayer(player))
+            {
+                throw new ArgumentOutOfRangeException(nameof(player));
+            }
+
+            return player == PlayerId.PlayerA ? PlayerAEffects : PlayerBEffects;
+        }
+
+        public int GetCardCount(PlayerId player)
+        {
+            if (!IsValidPlayer(player))
+            {
+                throw new ArgumentOutOfRangeException(nameof(player));
+            }
+
+            return player == PlayerId.PlayerA ? PlayerACardCount : PlayerBCardCount;
         }
 
         public PlayerHands GetHands(PlayerId player)

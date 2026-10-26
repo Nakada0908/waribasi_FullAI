@@ -17,7 +17,16 @@ namespace Waribasi.Rules
         FingerCountOutOfRange,
         TotalNotPreserved,
         DistributionUnchanged,
-        InvalidEndReason
+        InvalidEndReason,
+        //追加:カード・初期配布・封印の拒否を区別する。
+        InitialCardsNotDealt,
+        InitialCardsAlreadyDealt,
+        CardAlreadyUsedThisTurn,
+        CardNotFound,
+        AutomaticCardOnly,
+        InvalidCardTarget,
+        CardUnchanged,
+        SourceHandSealed
     }
 
     public enum RuleEventType
@@ -29,7 +38,13 @@ namespace Waribasi.Rules
         HandEliminated,
         HandRevived,
         TurnChanged,
-        MatchEnded
+        MatchEnded,
+        //追加:すべて公開可能な通知だけを定義する。
+        CardsDrawn,
+        CardUsed,
+        EffectApplied,
+        EffectRemoved,
+        ChangeBlocked
     }
 
     public sealed class RuleEvent
@@ -42,10 +57,20 @@ namespace Waribasi.Rules
         public ActionRejection Rejection { get; }
         public MatchEndReason EndReason { get; }
 
+        //追加:札内容は使用済みの公開記録だけ。補充は枚数のみ。
+        public CardUseRecord CardUse { get; }
+        public int? DrawnCount { get; }
+        public EffectKind? Effect { get; }
+        public long? ExpiresAfterTurn { get; }
+        public EffectRemovalReason? RemovalReason { get; }
+
         internal RuleEvent(RuleEventType type, PlayerId? player = null, HandSide? hand = null,
             int? previousCount = null, int? count = null,
             ActionRejection rejection = ActionRejection.None,
-            MatchEndReason endReason = MatchEndReason.None)
+            //変更:公開するカード使用・効果の情報を受け取る。
+            MatchEndReason endReason = MatchEndReason.None, CardUseRecord cardUse = null,
+            int? drawnCount = null, EffectKind? effect = null, long? expiresAfterTurn = null,
+            EffectRemovalReason? removalReason = null)
         {
             Type = type;
             Player = player;
@@ -54,6 +79,12 @@ namespace Waribasi.Rules
             Count = count;
             Rejection = rejection;
             EndReason = endReason;
+            //追加:通知には未使用札・抽選状態を保持しない。
+            CardUse = cardUse;
+            DrawnCount = drawnCount;
+            Effect = effect;
+            ExpiresAfterTurn = expiresAfterTurn;
+            RemovalReason = removalReason;
         }
     }
 
