@@ -119,3 +119,6 @@ Desktop.ini
 
 # Local GPT notes and audit files.
 /ChatGPT/
+
+# Local project specifications, tasks, and handoff documents.
+/Docs/
