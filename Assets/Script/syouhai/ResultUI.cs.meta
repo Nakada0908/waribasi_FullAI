@@ -1,0 +1,12 @@
+fileFormatVersion: 2
+guid: 283638cb14d3a594cb8ebc67f536f9af
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - winnerTMP: {fileID: 2871783876653987136, guid: 2421a817ccbdb5047a9fd350feb69637, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

@@ -1,0 +1,25 @@
+fileFormatVersion: 2
+guid: e1b396d188dc8b946a5029e6fbca2d47
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - c1: {fileID: 21300000, guid: c82f6932bba88724a907a4c48025450f, type: 3}
+  - c2: {fileID: 21300000, guid: 4e0da9f577ea80349baa5954731d5d2e, type: 3}
+  - c3: {fileID: 21300000, guid: 6a0332b9478c76f4fae0c485368ca482, type: 3}
+  - c4: {fileID: 21300000, guid: 9071cb4dcb401054e9fb5c2ae3e37762, type: 3}
+  - c11: {fileID: 21300000, guid: 4cc36656b262d6242ba7c18c3657c1e2, type: 3}
+  - c12: {fileID: 21300000, guid: a2772f1dbe9f14541b5c2c9c5414205c, type: 3}
+  - c13: {fileID: 21300000, guid: 147a8159a51cf014b8c8331d4006b3d3, type: 3}
+  - c22: {fileID: 21300000, guid: 0cf12267c0befaa4ca69311f86ce3226, type: 3}
+  - c14: {fileID: 21300000, guid: 882e513f9a0f01b49893b9ddd08ec4b0, type: 3}
+  - c23: {fileID: 21300000, guid: 9e4831ca7d14cd343b1c731072641e4d, type: 3}
+  - c24: {fileID: 21300000, guid: 9ff5cc305a421ab49ac53535379c09f7, type: 3}
+  - c33: {fileID: 21300000, guid: 610bf9abea5b7114a86cd6c1859ce205, type: 3}
+  - c34: {fileID: 21300000, guid: 9bf451ff7a898a34580d923aa221d5c4, type: 3}
+  - c44: {fileID: 21300000, guid: bd91e25e637966d41a120fc01fcea13e, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

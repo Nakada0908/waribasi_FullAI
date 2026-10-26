@@ -1,0 +1,12 @@
+fileFormatVersion: 2
+guid: d29ede842dc1ae8409dc05637f913f66
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - WinnerUI: {fileID: 2331217581287022457, guid: 8a702c934eb43ef4890b20a27824a9da, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

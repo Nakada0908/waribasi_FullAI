@@ -1,2 +1,28 @@
 # Auto detect text files and perform LF normalization
-* text=auto
+* text=auto eol=lf
+
+# Keep binary assets unchanged.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.psd binary
+*.fbx binary
+*.blend binary
+*.ttf binary
+*.otf binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.mp4 binary
+*.zip binary
+*.7z binary
+*.unitypackage binary
+*.dll binary
+*.exe binary
+
+# Windows command scripts use CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

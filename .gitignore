@@ -73,3 +73,49 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Local editor settings and additional generated files
+.idea/
+.vscode/
+*.slnx
+*.rsuser
+*.sln.docstates
+/TestResults/
+
+# Operating system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local environment files; keep templates available for version control
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Signing keys and certificates containing private keys
+*.keystore
+*.jks
+*.p12
+*.pfx
+
+# Local-only third-party and derived assets.
+# Keep these assets and their .meta files locally; Git does not back them up.
+/Assets/Image/
+/Assets/Image.meta
+/Assets/Object/Hand_Brender/
+/Assets/Object/Hand_Brender.meta
+/Assets/Material/
+/Assets/Material.meta
+/Assets/TextMesh Pro/
+/Assets/TextMesh Pro.meta
+
+# Unity template tutorial content.
+/Assets/TutorialInfo/
+/Assets/TutorialInfo.meta
+/Assets/Readme.asset
+/Assets/Readme.asset.meta
+
+# Local GPT notes and audit files.
+/ChatGPT/
