@@ -14,12 +14,36 @@ public class GameQuitManager : MonoBehaviour
         DontDestroyOnLoad(manager);
     }
 
-    void Update()
+    //変更:UIの取消と入力欄の編集を、既存の全体終了より優先する。
+    void LateUpdate()
     {
-        //Escキーが押されたら終了処理を呼ぶ、Androidの戻るボタン（KeyCode.Escape）にも対応
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (!Waribasi.Presentation.GameInputRouter.EscapePressed ||
+            Waribasi.Presentation.GameInputRouter.EscapeReservedForText)
+        {
+            return;
+        }
+        var interaction = Waribasi.Presentation.MatchInteractionController.Instance;
+        if (interaction != null && interaction.HistoryOpen)
+        {
+            Waribasi.Presentation.MatchHudPresenter.Instance?.ShowHistory(false);
+        }
+        else if (interaction != null && interaction.HasSelection)
+        {
+            interaction.CancelSelection();
+        }
+        else
         {
             Application.Quit();
         }
     }
+
+//削除:従来の処理は参照用に保存する。
+//    void Update()
+//    {
+//        //Escキーが押されたら終了処理を呼ぶ、Androidの戻るボタン（KeyCode.Escape）にも対応
+//        if (Input.GetKeyDown(KeyCode.Escape))
+//        {
+//            Application.Quit();
+//        }
+//    }
 }

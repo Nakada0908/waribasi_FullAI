@@ -1,0 +1,9 @@
+{
+    "name": "Waribasi.Presentation.Tests",
+    "references": ["Waribasi.Rules", "Waribasi.MatchFlow", "Unity.InputSystem", "Unity.ugui", "Unity.TextMeshPro", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+    "includePlatforms": ["Editor"],
+    "overrideReferences": true,
+    "precompiledReferences": ["nunit.framework.dll"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS"]
+}

@@ -1,8 +1,6 @@
-//変更:正式な更新を共通ルールと認証済み通信窓口へ集約する。
-using System.Collections;
+//変更:ローカルの選択をSceneの共通管理へ集約する。
 using Unity.Netcode;
-using UnityEngine;
-using Waribasi.Networking;
+using Waribasi.Presentation;
 using Waribasi.Rules;
 
 public enum TargetHandType
@@ -14,13 +12,8 @@ public enum TargetHandType
 
 public class CardAction : NetworkBehaviour
 {
-    //変更:既存UI向けの公開コピー。使用可否は共通ルールが判定する。
     public NetworkVariable<bool> turnused = new NetworkVariable<bool>(false,
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private long selectedCardId;
-    private long selectedVersion;
-    private int selectedIndex;
-    private int confirmation;
 
     public void ApplyConfirmed(GameState state, PlayerId player)
     {
@@ -30,96 +23,164 @@ public class CardAction : NetworkBehaviour
         }
     }
 
+    //変更:札ID・版・対象・割り当ては共通選択窓口で保持する。
     public void OnCardSelected(int index)
     {
-        var view = MatchClientState.Instance;
-        if (!IsOwner || confirmation != 0 || view == null || !view.CanAct ||
-            view.Public.turnPhase != (int)TurnPhase.CardOrNormalAction || index < 0 || index >= view.OwnHand.Count)
+        if (IsOwner)
         {
-            return;
-        }
-        var card = view.OwnHand[index];
-        if (card.Definition.Kind == CardKind.Revival)
-        {
-            return;
-        }
-        selectedCardId = card.Id;
-        selectedVersion = view.Public.stateVersion;
-        selectedIndex = index;
-        confirmation = 1;
-        CardButtonDraw.Instance?.SelectCardAnim(index);
-        if (card.Definition.NeedsHand)
-        {
-            HandSelectUI.Instance?.ShowUI();
-        }
-        else
-        {
-            StartCoroutine(ConfirmCoroutine(TargetHandType.Both));
+            MatchInteractionController.Instance?.SelectCard(index);
         }
     }
 
     public void OnHandSelected(TargetHandType hand)
     {
-        if (confirmation != 1)
+        //変更:旧UIの左右選択も同じ対象選択へ渡す。
+        if (IsOwner && hand != TargetHandType.Both)
         {
-            return;
-        }
-        HandSelectUI.Instance?.DeleteUI();
-        StartCoroutine(ConfirmCoroutine(hand));
-    }
-
-    private IEnumerator ConfirmCoroutine(TargetHandType hand)
-    {
-        ConfirmCancelUI.Instance?.ShowUI();
-        yield return new WaitUntil(() => confirmation != 1 || !SelectionIsCurrent());
-        ConfirmCancelUI.Instance?.DeleteUI();
-        CardButtonDraw.Instance?.ResetCardAnim(selectedIndex);
-        bool confirmed = confirmation == 2 && SelectionIsCurrent();
-        confirmation = 0;
-        if (confirmed)
-        {
-            HandSide? side = hand == TargetHandType.Left ? HandSide.Left :
-                hand == TargetHandType.Right ? HandSide.Right : (HandSide?)null;
-            MatchNetworkController.Instance?.SendCard(selectedCardId, side, false, selectedVersion);
-        }
-    }
-
-    private bool SelectionIsCurrent()
-    {
-        var view = MatchClientState.Instance;
-        return view != null && view.CanAct && view.Public.stateVersion == selectedVersion;
-    }
-
-    private void Update()
-    {
-        if (confirmation == 1 && !SelectionIsCurrent())
-        {
-            confirmation = 3;
-            HandSelectUI.Instance?.DeleteUI();
-            ConfirmCancelUI.Instance?.DeleteUI();
-            //追加:片手選択中には確認コルーチンがまだないため、ここでも解除する。
-            StopAllCoroutines();
-            CardButtonDraw.Instance?.ResetCardAnim(selectedIndex);
-            confirmation = 0;
+            MatchInteractionController.Instance?.SelectCardTarget(hand == TargetHandType.Left ? HandSide.Left : HandSide.Right);
         }
     }
 
     public void OnClickConfirm()
     {
-        if (confirmation == 1)
+        if (IsOwner)
         {
-            confirmation = 2;
+            MatchInteractionController.Instance?.ConfirmSelection();
         }
     }
 
     public void OnClickCancel()
     {
-        if (confirmation == 1)
+        if (IsOwner)
         {
-            confirmation = 3;
+            MatchInteractionController.Instance?.CancelSelection();
         }
     }
 }
+
+//削除:T04移行前の実装を参照用に保存する。
+////変更:正式な更新を共通ルールと認証済み通信窓口へ集約する。
+//using System.Collections;
+//using Unity.Netcode;
+//using UnityEngine;
+//using Waribasi.Networking;
+//using Waribasi.Rules;
+//
+//public enum TargetHandType
+//{
+//    Both,
+//    Left,
+//    Right
+//}
+//
+//public class CardAction : NetworkBehaviour
+//{
+//    //変更:既存UI向けの公開コピー。使用可否は共通ルールが判定する。
+//    public NetworkVariable<bool> turnused = new NetworkVariable<bool>(false,
+//        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+//    private long selectedCardId;
+//    private long selectedVersion;
+//    private int selectedIndex;
+//    private int confirmation;
+//
+//    public void ApplyConfirmed(GameState state, PlayerId player)
+//    {
+//        if (IsServer)
+//        {
+//            turnused.Value = state.CurrentPlayer == player && state.TurnPhase == TurnPhase.NormalActionOnly;
+//        }
+//    }
+//
+//    public void OnCardSelected(int index)
+//    {
+//        var view = MatchClientState.Instance;
+//        if (!IsOwner || confirmation != 0 || view == null || !view.CanAct ||
+//            view.Public.turnPhase != (int)TurnPhase.CardOrNormalAction || index < 0 || index >= view.OwnHand.Count)
+//        {
+//            return;
+//        }
+//        var card = view.OwnHand[index];
+//        if (card.Definition.Kind == CardKind.Revival)
+//        {
+//            return;
+//        }
+//        selectedCardId = card.Id;
+//        selectedVersion = view.Public.stateVersion;
+//        selectedIndex = index;
+//        confirmation = 1;
+//        CardButtonDraw.Instance?.SelectCardAnim(index);
+//        if (card.Definition.NeedsHand)
+//        {
+//            HandSelectUI.Instance?.ShowUI();
+//        }
+//        else
+//        {
+//            StartCoroutine(ConfirmCoroutine(TargetHandType.Both));
+//        }
+//    }
+//
+//    public void OnHandSelected(TargetHandType hand)
+//    {
+//        if (confirmation != 1)
+//        {
+//            return;
+//        }
+//        HandSelectUI.Instance?.DeleteUI();
+//        StartCoroutine(ConfirmCoroutine(hand));
+//    }
+//
+//    private IEnumerator ConfirmCoroutine(TargetHandType hand)
+//    {
+//        ConfirmCancelUI.Instance?.ShowUI();
+//        yield return new WaitUntil(() => confirmation != 1 || !SelectionIsCurrent());
+//        ConfirmCancelUI.Instance?.DeleteUI();
+//        CardButtonDraw.Instance?.ResetCardAnim(selectedIndex);
+//        bool confirmed = confirmation == 2 && SelectionIsCurrent();
+//        confirmation = 0;
+//        if (confirmed)
+//        {
+//            HandSide? side = hand == TargetHandType.Left ? HandSide.Left :
+//                hand == TargetHandType.Right ? HandSide.Right : (HandSide?)null;
+//            MatchNetworkController.Instance?.SendCard(selectedCardId, side, false, selectedVersion);
+//        }
+//    }
+//
+//    private bool SelectionIsCurrent()
+//    {
+//        var view = MatchClientState.Instance;
+//        return view != null && view.CanAct && view.Public.stateVersion == selectedVersion;
+//    }
+//
+//    private void Update()
+//    {
+//        if (confirmation == 1 && !SelectionIsCurrent())
+//        {
+//            confirmation = 3;
+//            HandSelectUI.Instance?.DeleteUI();
+//            ConfirmCancelUI.Instance?.DeleteUI();
+//            //追加:片手選択中には確認コルーチンがまだないため、ここでも解除する。
+//            StopAllCoroutines();
+//            CardButtonDraw.Instance?.ResetCardAnim(selectedIndex);
+//            confirmation = 0;
+//        }
+//    }
+//
+//    public void OnClickConfirm()
+//    {
+//        if (confirmation == 1)
+//        {
+//            confirmation = 2;
+//        }
+//    }
+//
+//    public void OnClickCancel()
+//    {
+//        if (confirmation == 1)
+//        {
+//            confirmation = 3;
+//        }
+//    }
+//}
 
 //削除:旧実装は参照用に保存し、RPC登録・直接更新・旧配布を実行しない。
 //using Unity.Netcode;

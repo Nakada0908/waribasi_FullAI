@@ -19,12 +19,21 @@ public class CanvasReadyChecker : MonoBehaviour
         SetReady(MatchClientState.Instance != null && MatchClientState.Instance.CanAct);
     }
 
+    //変更:履歴閲覧を止めず、ゲーム操作の可否は各操作ボタンで制御する。
     private void SetReady(bool ready)
     {
         IsGameReady = ready;
-        canvasGroup.interactable = ready;
-        canvasGroup.alpha = ready ? 1 : 0.5f;
+        canvasGroup.interactable = true;
+        canvasGroup.alpha = 1;
     }
+
+//削除:従来の処理は参照用に保存する。
+//    private void SetReady(bool ready)
+//    {
+//        IsGameReady = ready;
+//        canvasGroup.interactable = ready;
+//        canvasGroup.alpha = ready ? 1 : 0.5f;
+//    }
 }
 
 //削除:旧実装は参照用に保存し、RPC登録・直接更新・旧配布を実行しない。

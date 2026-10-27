@@ -8,14 +8,25 @@ public class RestartGame : MonoBehaviour
     //フリーズ防止のため、連打できないようにするフラグ
     private bool isDisconnecting = false;
 
+    //変更:既存のタイトル復帰処理をInput SystemのSpace入力へ接続する。
     void Update()
     {
-        //Spaceキーが押され、かつ現在切断処理中でない場合
-        if (Input.GetKeyDown(KeyCode.Space) && !isDisconnecting)
+        if (Waribasi.Presentation.GameInputRouter.RestartPressed &&
+            !Waribasi.Presentation.GameInputRouter.IsEditingText && !isDisconnecting)
         {
             StartCoroutine(SafeDisconnectAndLoad());
         }
     }
+
+//削除:従来の処理は参照用に保存する。
+//    void Update()
+//    {
+//        //Spaceキーが押され、かつ現在切断処理中でない場合
+//        if (Input.GetKeyDown(KeyCode.Space) && !isDisconnecting)
+//        {
+//            StartCoroutine(SafeDisconnectAndLoad());
+//        }
+//    }
 
     //モバイルの「タイトルに戻る」ボタンのOnClickに設定する
     public void OnClickRestartButton()

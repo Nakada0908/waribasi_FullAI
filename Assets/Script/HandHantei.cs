@@ -1,103 +1,119 @@
-//変更:正式な更新を共通ルールと認証済み通信窓口へ集約する。
+//変更:盤面もEventSystemから共通の選択窓口へ渡す。
 using Unity.Netcode;
-using UnityEngine;
-using UnityEngine.EventSystems;
-using Waribasi.Networking;
+using Waribasi.Presentation;
 
 public class HandHantei : NetworkBehaviour
 {
     public NetworkObject hand1, hand2;
-    private MatchClientState view;
 
-    public override void OnNetworkSpawn()
+    //変更:旧入力APIと独立したRaycastを実行しない。
+    public void OnHandSelected(NetworkObject hand)
     {
-        view = MatchClientState.Instance;
-        if (view != null)
-        {
-            view.Changed += OnStateChanged;
-        }
-    }
-
-    public override void OnNetworkDespawn()
-    {
-        if (view != null)
-        {
-            view.Changed -= OnStateChanged;
-        }
-        ResetSelect();
-        base.OnNetworkDespawn();
-    }
-
-    private void OnStateChanged()
-    {
-        ResetSelect();
-    }
-
-    private bool IsPointerOverUI()
-    {
-        if (EventSystem.current == null)
-        {
-            return false;
-        }
-        if (Input.touchCount > 0)
-        {
-            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
-        }
-        return EventSystem.current.IsPointerOverGameObject();
-    }
-
-    private void Update()
-    {
-        //追加:OnNetworkSpawnの順序に依存せず、遅れて作られた本人観測へ接続する。
-        if (view == null && MatchClientState.Instance != null)
-        {
-            view = MatchClientState.Instance;
-            view.Changed += OnStateChanged;
-        }
-        if (view == null || !view.CanAct || IsPointerOverUI() || !Input.GetMouseButtonDown(0) || Camera.main == null)
-        {
-            return;
-        }
-        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        if (!Physics.Raycast(ray, out RaycastHit hit))
-        {
-            return;
-        }
-        var hand = hit.collider.GetComponentInParent<NetworkObject>();
-        if (hand == null || !hand.CompareTag("Hand"))
-        {
-            return;
-        }
-        if (hand1 == null)
-        {
-            if (!hand.IsOwner)
-            {
-                return;
-            }
-            hand1 = hand;
-            hand1.GetComponentInChildren<HandHighlight>()?.SetHighlight(true);
-            return;
-        }
-        if (hand.OwnerClientId == hand1.OwnerClientId)
-        {
-            ResetSelect();
-            return;
-        }
-        hand2 = hand;
-        MatchNetworkController.Instance?.SendAttack(hand1, hand2);
-        ResetSelect();
-    }
-
-    private void ResetSelect()
-    {
-        if (hand1 != null)
-        {
-            hand1.GetComponentInChildren<HandHighlight>()?.SetHighlight(false);
-        }
-        hand1 = null;
-        hand2 = null;
+        MatchInteractionController.Instance?.SelectHand(hand);
     }
 }
+
+//削除:T04移行前の実装を参照用に保存する。
+////変更:正式な更新を共通ルールと認証済み通信窓口へ集約する。
+//using Unity.Netcode;
+//using UnityEngine;
+//using UnityEngine.EventSystems;
+//using Waribasi.Networking;
+//
+//public class HandHantei : NetworkBehaviour
+//{
+//    public NetworkObject hand1, hand2;
+//    private MatchClientState view;
+//
+//    public override void OnNetworkSpawn()
+//    {
+//        view = MatchClientState.Instance;
+//        if (view != null)
+//        {
+//            view.Changed += OnStateChanged;
+//        }
+//    }
+//
+//    public override void OnNetworkDespawn()
+//    {
+//        if (view != null)
+//        {
+//            view.Changed -= OnStateChanged;
+//        }
+//        ResetSelect();
+//        base.OnNetworkDespawn();
+//    }
+//
+//    private void OnStateChanged()
+//    {
+//        ResetSelect();
+//    }
+//
+//    private bool IsPointerOverUI()
+//    {
+//        if (EventSystem.current == null)
+//        {
+//            return false;
+//        }
+//        if (Input.touchCount > 0)
+//        {
+//            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
+//        }
+//        return EventSystem.current.IsPointerOverGameObject();
+//    }
+//
+//    private void Update()
+//    {
+//        //追加:OnNetworkSpawnの順序に依存せず、遅れて作られた本人観測へ接続する。
+//        if (view == null && MatchClientState.Instance != null)
+//        {
+//            view = MatchClientState.Instance;
+//            view.Changed += OnStateChanged;
+//        }
+//        if (view == null || !view.CanAct || IsPointerOverUI() || !Input.GetMouseButtonDown(0) || Camera.main == null)
+//        {
+//            return;
+//        }
+//        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+//        if (!Physics.Raycast(ray, out RaycastHit hit))
+//        {
+//            return;
+//        }
+//        var hand = hit.collider.GetComponentInParent<NetworkObject>();
+//        if (hand == null || !hand.CompareTag("Hand"))
+//        {
+//            return;
+//        }
+//        if (hand1 == null)
+//        {
+//            if (!hand.IsOwner)
+//            {
+//                return;
+//            }
+//            hand1 = hand;
+//            hand1.GetComponentInChildren<HandHighlight>()?.SetHighlight(true);
+//            return;
+//        }
+//        if (hand.OwnerClientId == hand1.OwnerClientId)
+//        {
+//            ResetSelect();
+//            return;
+//        }
+//        hand2 = hand;
+//        MatchNetworkController.Instance?.SendAttack(hand1, hand2);
+//        ResetSelect();
+//    }
+//
+//    private void ResetSelect()
+//    {
+//        if (hand1 != null)
+//        {
+//            hand1.GetComponentInChildren<HandHighlight>()?.SetHighlight(false);
+//        }
+//        hand1 = null;
+//        hand2 = null;
+//    }
+//}
 
 //削除:旧実装は参照用に保存し、RPC登録・直接更新・旧配布を実行しない。
 //using System.Collections;//IEnumerator（コルーチン）を使うために必要

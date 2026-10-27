@@ -103,83 +103,89 @@ namespace Waribasi.Rules
             return player == PlayerId.PlayerA ? cardsA : cardsB;
         }
 
-        private ActionRejection ValidateCard(PlayerId actor, UseCardAction action)
-        {
-            if (state.TurnPhase != TurnPhase.CardOrNormalAction)
-            {
-                return ActionRejection.CardAlreadyUsedThisTurn;
-            }
+        //変更:公開情報だけで行う照会はRuleActionQueryへ移動した。
 
-            var handCard = GetPrivateCards(actor).Hand.FirstOrDefault(c => c.Id == action.CardId);
-            if (handCard == null)
-            {
-                return ActionRejection.CardNotFound;
-            }
+//削除:従来の処理は参照用に保存する。
+//        private ActionRejection ValidateCard(PlayerId actor, UseCardAction action)
+//        {
+//            if (state.TurnPhase != TurnPhase.CardOrNormalAction)
+//            {
+//                return ActionRejection.CardAlreadyUsedThisTurn;
+//            }
+//
+//            var handCard = GetPrivateCards(actor).Hand.FirstOrDefault(c => c.Id == action.CardId);
+//            if (handCard == null)
+//            {
+//                return ActionRejection.CardNotFound;
+//            }
+//
+//            var card = handCard.Definition;
+//            if (card.Kind == CardKind.Revival)
+//            {
+//                return ActionRejection.AutomaticCardOnly;
+//            }
+//
+//            if ((card.NeedsHand ? !action.Target.HasValue : action.Target.HasValue) ||
+//                (action.SwapValues && !card.IsBoth))
+//            {
+//                return ActionRejection.InvalidCardTarget;
+//            }
+//
+//            if (action.Target.HasValue && !GameState.IsValidSide(action.Target.Value))
+//            {
+//                return ActionRejection.InvalidHandSide;
+//            }
+//
+//            if (card.IsDraw)
+//            {
+//                return ActionRejection.None;
+//            }
+//
+//            var target = card.IsSelf ? actor : GameState.GetOpponent(actor);
+//            var hands = state.GetHands(target);
+//            if (card.IsBoth ? hands.Left == 0 || hands.Right == 0 : hands.GetCount(action.Target.Value) == 0)
+//            {
+//                return ActionRejection.TargetHandEliminated;
+//            }
+//
+//            if (card.IsNumber)
+//            {
+//                var after = ResolveNumberHands(actor, target, card, action);
+//                if (after.Left == hands.Left && after.Right == hands.Right)
+//                {
+//                    return ActionRejection.CardUnchanged;
+//                }
+//            }
+//
+//            return ActionRejection.None;
+//        }
 
-            var card = handCard.Definition;
-            if (card.Kind == CardKind.Revival)
-            {
-                return ActionRejection.AutomaticCardOnly;
-            }
+        //変更:公開情報だけで行う照会はRuleActionQueryへ移動した。
 
-            if ((card.NeedsHand ? !action.Target.HasValue : action.Target.HasValue) ||
-                (action.SwapValues && !card.IsBoth))
-            {
-                return ActionRejection.InvalidCardTarget;
-            }
-
-            if (action.Target.HasValue && !GameState.IsValidSide(action.Target.Value))
-            {
-                return ActionRejection.InvalidHandSide;
-            }
-
-            if (card.IsDraw)
-            {
-                return ActionRejection.None;
-            }
-
-            var target = card.IsSelf ? actor : GameState.GetOpponent(actor);
-            var hands = state.GetHands(target);
-            if (card.IsBoth ? hands.Left == 0 || hands.Right == 0 : hands.GetCount(action.Target.Value) == 0)
-            {
-                return ActionRejection.TargetHandEliminated;
-            }
-
-            if (card.IsNumber)
-            {
-                var after = ResolveNumberHands(actor, target, card, action);
-                if (after.Left == hands.Left && after.Right == hands.Right)
-                {
-                    return ActionRejection.CardUnchanged;
-                }
-            }
-
-            return ActionRejection.None;
-        }
-
-        private PlayerHands ResolveNumberHands(PlayerId actor, PlayerId target,
-            CardDefinition card, UseCardAction action)
-        {
-            var hands = state.GetHands(target);
-            foreach (var side in new[] { HandSide.Left, HandSide.Right })
-            {
-                if (!card.IsBoth && action.Target != side)
-                {
-                    continue;
-                }
-
-                if (actor != target && state.GetEffects(target).Get(side).IsDefended)
-                {
-                    continue;
-                }
-
-                int count = card.IsBoth && ((side == HandSide.Right) != action.SwapValues)
-                    ? card.Second : card.First;
-                hands = hands.WithCount(side, count);
-            }
-
-            return hands;
-        }
+//削除:従来の処理は参照用に保存する。
+//        private PlayerHands ResolveNumberHands(PlayerId actor, PlayerId target,
+//            CardDefinition card, UseCardAction action)
+//        {
+//            var hands = state.GetHands(target);
+//            foreach (var side in new[] { HandSide.Left, HandSide.Right })
+//            {
+//                if (!card.IsBoth && action.Target != side)
+//                {
+//                    continue;
+//                }
+//
+//                if (actor != target && state.GetEffects(target).Get(side).IsDefended)
+//                {
+//                    continue;
+//                }
+//
+//                int count = card.IsBoth && ((side == HandSide.Right) != action.SwapValues)
+//                    ? card.Second : card.First;
+//                hands = hands.WithCount(side, count);
+//            }
+//
+//            return hands;
+//        }
 
         private void ApplyCard(WorkingState work, PlayerId actor, UseCardAction action, List<RuleEvent> events)
         {
@@ -209,7 +215,8 @@ namespace Waribasi.Rules
                     }
                 }
 
-                ApplyHands(work, target.Value, ResolveNumberHands(actor, target.Value, card, action), events);
+                //変更:本数の解決も照会と同じ処理を使う。
+                ApplyHands(work, target.Value, RuleActionQuery.ResolveNumberHands(state, actor, target.Value, card, action), events);
             }
             else
             {
@@ -313,26 +320,29 @@ namespace Waribasi.Rules
             work.Effects[seat] = work.Effects[seat].With(side, effects);
         }
 
-        private void AddCardCandidates(List<GameAction> actions, PlayerId actor)
-        {
-            foreach (var handCard in GetPrivateCards(actor).Hand)
-            {
-                var card = handCard.Definition;
-                if (card.NeedsHand)
-                {
-                    AddIfLegal(actions, actor, new UseCardAction(handCard.Id, HandSide.Left));
-                    AddIfLegal(actions, actor, new UseCardAction(handCard.Id, HandSide.Right));
-                }
-                else
-                {
-                    AddIfLegal(actions, actor, new UseCardAction(handCard.Id));
-                    if (card.IsBoth && card.First != card.Second)
-                    {
-                        AddIfLegal(actions, actor, new UseCardAction(handCard.Id, swapValues: true));
-                    }
-                }
-            }
-        }
+        //変更:公開情報だけで行う照会はRuleActionQueryへ移動した。
+
+//削除:従来の処理は参照用に保存する。
+//        private void AddCardCandidates(List<GameAction> actions, PlayerId actor)
+//        {
+//            foreach (var handCard in GetPrivateCards(actor).Hand)
+//            {
+//                var card = handCard.Definition;
+//                if (card.NeedsHand)
+//                {
+//                    AddIfLegal(actions, actor, new UseCardAction(handCard.Id, HandSide.Left));
+//                    AddIfLegal(actions, actor, new UseCardAction(handCard.Id, HandSide.Right));
+//                }
+//                else
+//                {
+//                    AddIfLegal(actions, actor, new UseCardAction(handCard.Id));
+//                    if (card.IsBoth && card.First != card.Second)
+//                    {
+//                        AddIfLegal(actions, actor, new UseCardAction(handCard.Id, swapValues: true));
+//                    }
+//                }
+//            }
+//        }
 
         private GameState BuildPublicState(PlayerHands playerA, PlayerHands playerB, PlayerId currentPlayer,
             MatchPhase matchPhase, TurnPhase turnPhase, long turnNumber, long stateVersion,

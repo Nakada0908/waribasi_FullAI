@@ -1,0 +1,8 @@
+{
+    "name": "Waribasi.Presentation.PlayTests",
+    "references": ["Unity.InputSystem", "Unity.ugui", "UnityEngine.TestRunner"],
+    "overrideReferences": true,
+    "precompiledReferences": ["nunit.framework.dll"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS"]
+}

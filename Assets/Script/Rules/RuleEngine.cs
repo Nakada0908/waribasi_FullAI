@@ -107,79 +107,86 @@ namespace Waribasi.Rules
             });
         }
 
+        //変更:正式要求と表示用照会が同じ検証条件を使う。
         public ActionRejection Validate(PlayerId actor, GameAction action, long expectedVersion)
         {
-            if (!GameState.IsValidPlayer(actor))
-            {
-                return ActionRejection.InvalidPlayer;
-            }
-
-            if (expectedVersion != state.StateVersion)
-            {
-                return ActionRejection.StaleState;
-            }
-
-            if (state.MatchPhase != MatchPhase.Active)
-            {
-                return ActionRejection.MatchNotActive;
-            }
-
-            if (actor != state.CurrentPlayer)
-            {
-                return ActionRejection.NotYourTurn;
-            }
-
-            //追加:カードの検証も同じ要求入口に集約する。
-            if (action is UseCardAction cardAction)
-            {
-                return ValidateCard(actor, cardAction);
-            }
-
-            var hands = state.GetHands(actor);
-            if (action is AttackAction attack)
-            {
-                if (!GameState.IsValidSide(attack.Source) || !GameState.IsValidSide(attack.Target))
-                {
-                    return ActionRejection.InvalidHandSide;
-                }
-
-                if (hands.GetCount(attack.Source) == 0)
-                {
-                    return ActionRejection.SourceHandEliminated;
-                }
-
-                //追加:封印された生存手も通常攻撃元にはできない。
-                if (state.GetEffects(actor).Get(attack.Source).IsSealed)
-                {
-                    return ActionRejection.SourceHandSealed;
-                }
-
-                var opponent = state.GetHands(GameState.GetOpponent(actor));
-                return opponent.GetCount(attack.Target) == 0
-                    ? ActionRejection.TargetHandEliminated
-                    : ActionRejection.None;
-            }
-
-            if (action is RedistributeAction distribution)
-            {
-                if (distribution.Left < 0 || distribution.Left > 4 ||
-                    distribution.Right < 0 || distribution.Right > 4)
-                {
-                    return ActionRejection.FingerCountOutOfRange;
-                }
-
-                if (distribution.Left + distribution.Right != hands.Total)
-                {
-                    return ActionRejection.TotalNotPreserved;
-                }
-
-                return distribution.Left == hands.Left && distribution.Right == hands.Right
-                    ? ActionRejection.DistributionUnchanged
-                    : ActionRejection.None;
-            }
-
-            return ActionRejection.InvalidAction;
+            return new RuleActionQuery(state, GetPrivateCards(actor).Hand).Validate(actor, action, expectedVersion);
         }
+
+//削除:従来の処理は参照用に保存する。
+//        public ActionRejection Validate(PlayerId actor, GameAction action, long expectedVersion)
+//        {
+//            if (!GameState.IsValidPlayer(actor))
+//            {
+//                return ActionRejection.InvalidPlayer;
+//            }
+//
+//            if (expectedVersion != state.StateVersion)
+//            {
+//                return ActionRejection.StaleState;
+//            }
+//
+//            if (state.MatchPhase != MatchPhase.Active)
+//            {
+//                return ActionRejection.MatchNotActive;
+//            }
+//
+//            if (actor != state.CurrentPlayer)
+//            {
+//                return ActionRejection.NotYourTurn;
+//            }
+//
+//            //追加:カードの検証も同じ要求入口に集約する。
+//            if (action is UseCardAction cardAction)
+//            {
+//                return ValidateCard(actor, cardAction);
+//            }
+//
+//            var hands = state.GetHands(actor);
+//            if (action is AttackAction attack)
+//            {
+//                if (!GameState.IsValidSide(attack.Source) || !GameState.IsValidSide(attack.Target))
+//                {
+//                    return ActionRejection.InvalidHandSide;
+//                }
+//
+//                if (hands.GetCount(attack.Source) == 0)
+//                {
+//                    return ActionRejection.SourceHandEliminated;
+//                }
+//
+//                //追加:封印された生存手も通常攻撃元にはできない。
+//                if (state.GetEffects(actor).Get(attack.Source).IsSealed)
+//                {
+//                    return ActionRejection.SourceHandSealed;
+//                }
+//
+//                var opponent = state.GetHands(GameState.GetOpponent(actor));
+//                return opponent.GetCount(attack.Target) == 0
+//                    ? ActionRejection.TargetHandEliminated
+//                    : ActionRejection.None;
+//            }
+//
+//            if (action is RedistributeAction distribution)
+//            {
+//                if (distribution.Left < 0 || distribution.Left > 4 ||
+//                    distribution.Right < 0 || distribution.Right > 4)
+//                {
+//                    return ActionRejection.FingerCountOutOfRange;
+//                }
+//
+//                if (distribution.Left + distribution.Right != hands.Total)
+//                {
+//                    return ActionRejection.TotalNotPreserved;
+//                }
+//
+//                return distribution.Left == hands.Left && distribution.Right == hands.Right
+//                    ? ActionRejection.DistributionUnchanged
+//                    : ActionRejection.None;
+//            }
+//
+//            return ActionRejection.InvalidAction;
+//        }
 
         public ActionResult TryApply(PlayerId actor, GameAction action, long expectedVersion)
         {
@@ -233,34 +240,41 @@ namespace Waribasi.Rules
             return CompleteNormalAction(work, changedPlayer, events);
         }
 
+        //変更:候補列挙も公開情報と本人札の共通照会へ集約する。
         public IReadOnlyList<GameAction> GetLegalActions(PlayerId actor)
         {
-            var actions = new List<GameAction>();
-            if (!GameState.IsValidPlayer(actor) || state.MatchPhase != MatchPhase.Active ||
-                actor != state.CurrentPlayer)
-            {
-                return actions.AsReadOnly();
-            }
-
-            var sides = new[] { HandSide.Left, HandSide.Right };
-            foreach (var source in sides)
-            {
-                foreach (var target in sides)
-                {
-                    AddIfLegal(actions, actor, new AttackAction(source, target));
-                }
-            }
-
-            int total = state.GetHands(actor).Total;
-            for (int left = 0; left <= 4; left++)
-            {
-                AddIfLegal(actions, actor, new RedistributeAction(left, total - left));
-            }
-
-            //追加:候補生成は検証だけを行い、抽選や手札を消費しない。
-            AddCardCandidates(actions, actor);
-            return actions.AsReadOnly();
+            return new RuleActionQuery(state, GetPrivateCards(actor).Hand).GetLegalActions(actor);
         }
+
+//削除:従来の処理は参照用に保存する。
+//        public IReadOnlyList<GameAction> GetLegalActions(PlayerId actor)
+//        {
+//            var actions = new List<GameAction>();
+//            if (!GameState.IsValidPlayer(actor) || state.MatchPhase != MatchPhase.Active ||
+//                actor != state.CurrentPlayer)
+//            {
+//                return actions.AsReadOnly();
+//            }
+//
+//            var sides = new[] { HandSide.Left, HandSide.Right };
+//            foreach (var source in sides)
+//            {
+//                foreach (var target in sides)
+//                {
+//                    AddIfLegal(actions, actor, new AttackAction(source, target));
+//                }
+//            }
+//
+//            int total = state.GetHands(actor).Total;
+//            for (int left = 0; left <= 4; left++)
+//            {
+//                AddIfLegal(actions, actor, new RedistributeAction(left, total - left));
+//            }
+//
+//            //追加:候補生成は検証だけを行い、抽選や手札を消費しない。
+//            AddCardCandidates(actions, actor);
+//            return actions.AsReadOnly();
+//        }
 
         //通信側が本人確認と期限判定を済ませた後に呼ぶ終了入口。
         public ActionResult TryEnd(PlayerId loser, MatchEndReason reason, long expectedVersion)
@@ -315,13 +329,16 @@ namespace Waribasi.Rules
             });
         }
 
-        private void AddIfLegal(List<GameAction> actions, PlayerId actor, GameAction action)
-        {
-            if (Validate(actor, action, state.StateVersion) == ActionRejection.None)
-            {
-                actions.Add(action);
-            }
-        }
+        //変更:候補生成はRuleActionQueryへ移動した。
+
+//削除:従来の処理は参照用に保存する。
+//        private void AddIfLegal(List<GameAction> actions, PlayerId actor, GameAction action)
+//        {
+//            if (Validate(actor, action, state.StateVersion) == ActionRejection.None)
+//            {
+//                actions.Add(action);
+//            }
+//        }
 
         //変更:脱落効果解除後に自動復活を解決してから勝敗を確定する。
         private ActionResult CompleteNormalAction(WorkingState work, PlayerId changedPlayer,

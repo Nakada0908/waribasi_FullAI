@@ -1,46 +1,217 @@
+//変更:公開の防御・封印と、本人だけの選択表示を組み合わせる。
+using Unity.Netcode;
 using UnityEngine;
+using Waribasi.Networking;
+using Waribasi.Presentation;
 
 public class HandHighlight : MonoBehaviour
 {
-    //SkinnedMeshRendererも取得できるように、親クラスである汎用的な「Renderer」を使用する
-    Renderer myRenderer;
-    Material[] originalMaterials; //元のマテリアル配列を保存
-
-    [Header("選択時のマテリアル")]
     public Material selectMaterial;
+    //追加:状態用素材と、手の表示とは別のマーカー。
+    [SerializeField] private Material stateOpaque;
+    [SerializeField] private Material stateTransparent;
+    [SerializeField] private GameObject selectionMarker;
+    [SerializeField] private GameObject sealMarker;
+    [SerializeField, Range(0.15f, 0.9f)] private float sealOpacity = 0.45f;
+    [SerializeField, Range(0, 2)] private float rainbowSpeed = 0.3f;
+    [SerializeField] private Vector3 markerOffset = new Vector3(0, 0.22f, 0);
+    private Renderer myRenderer;
+    private Material[] originalMaterials;
+    private Material opaqueInstance;
+    private Material transparentInstance;
+    private MaterialPropertyBlock properties;
+    private NetworkObject hand;
+    private HandRL side;
+    //追加:マーカーは手札に隠れる腕中央ではなく、既存の接触位置を基準にする。
+    private Transform markerAnchor;
+    private MatchClientState view;
+    private MatchInteractionController interaction;
+    private Camera localCamera;
+    private bool legacySelection;
 
-    void Awake()
+    private void Awake()
     {
-        //Rendererを取得するように変更
         myRenderer = GetComponent<Renderer>();
-
-        //エラー防止：もしアタッチし間違えても落ちないようにする
-        if (myRenderer == null) return;
-
-        //元のマテリアルをすべて取得して保存
-        originalMaterials = myRenderer.materials;
+        if (myRenderer == null)
+        {
+            return;
+        }
+        originalMaterials = myRenderer.sharedMaterials;
+        properties = new MaterialPropertyBlock();
+        hand = GetComponentInParent<NetworkObject>();
+        side = hand != null ? hand.GetComponent<HandRL>() : null;
+        markerAnchor = hand != null ? hand.transform.Find("targetpos") : null;
+        if (stateOpaque != null)
+        {
+            opaqueInstance = new Material(stateOpaque);
+            transparentInstance = new Material(stateTransparent);
+        }
+        Apply();
     }
 
-    //ハイライトをオン・オフする
-    public void SetHighlight(bool on)
+    private void Update()
     {
-        //エラー回避：マテリアルがセットされていなければ何もしない
-        if (myRenderer == null || selectMaterial == null) return;
-
-        if (on)
+        if (view == null && MatchClientState.Instance != null)
         {
-            //マテリアルをすべて「選択用マテリアル」に完全置換する
-            Material[] selectedMats = new Material[originalMaterials.Length];
-            for (int i = 0; i < originalMaterials.Length; i++)
-            {
-                selectedMats[i] = selectMaterial;
-            }
-            myRenderer.materials = selectedMats;
+            view = MatchClientState.Instance;
+            view.Changed += Apply;
+            Apply();
         }
-        else
+        if (interaction == null && MatchInteractionController.Instance != null)
         {
-            //元のマテリアル配列に戻す
-            myRenderer.materials = originalMaterials;
+            interaction = MatchInteractionController.Instance;
+            interaction.Changed += Apply;
+            Apply();
+        }
+        if (localCamera == null)
+        {
+            localCamera = Camera.main;
+        }
+        if (localCamera != null && myRenderer != null)
+        {
+            //変更:指先付近へマーカーを配置し、手札との重なりを避ける。
+            Vector3 position = (markerAnchor != null ? markerAnchor.position : myRenderer.bounds.center) + markerOffset;
+            if (selectionMarker != null)
+            {
+                selectionMarker.transform.position = position;
+                selectionMarker.transform.rotation = localCamera.transform.rotation;
+            }
+            if (sealMarker != null)
+            {
+                sealMarker.transform.position = position + localCamera.transform.right * 0.45f;
+                sealMarker.transform.rotation = localCamera.transform.rotation;
+            }
+        }
+    }
+
+    public void SetHighlight(bool selected)
+    {
+        //変更:既存呼出しも公開状態を消さずに選択だけ変更する。
+        legacySelection = selected;
+        Apply();
+    }
+
+    private void Apply()
+    {
+        if (myRenderer == null || originalMaterials == null)
+        {
+            return;
+        }
+        bool selected = interaction != null ? interaction.IsHandSelected(hand) : legacySelection;
+        bool defended = false;
+        bool sealedHand = false;
+        bool alive = true;
+        if (view?.Public != null && hand != null && side != null)
+        {
+            int player = hand.OwnerClientId == view.Public.playerAClientId ? 0 : 1;
+            int index = player * 2 + (int)MatchClientState.ToSide(side.handType);
+            var state = view.Public.hands[index];
+            alive = state.count != 0;
+            defended = state.defenseUntil != 0;
+            sealedHand = state.sealUntil != 0;
+        }
+        selected &= alive;
+        if (selectionMarker != null)
+        {
+            selectionMarker.SetActive(selected);
+        }
+        if (sealMarker != null)
+        {
+            sealMarker.SetActive(sealedHand && alive);
+        }
+        if ((!selected && !defended && !sealedHand) || opaqueInstance == null)
+        {
+            myRenderer.sharedMaterials = originalMaterials;
+            myRenderer.SetPropertyBlock(null);
+            return;
+        }
+        var materials = new Material[originalMaterials.Length];
+        for (int i = 0; i < materials.Length; i++)
+        {
+            materials[i] = sealedHand ? transparentInstance : opaqueInstance;
+        }
+        myRenderer.sharedMaterials = materials;
+        Material original = originalMaterials.Length > 0 ? originalMaterials[0] : null;
+        properties.Clear();
+        if (original != null)
+        {
+            properties.SetColor("_BaseColor", original.HasProperty("_BaseColor") ? original.GetColor("_BaseColor") :
+                original.HasProperty("_Color") ? original.GetColor("_Color") : Color.white);
+            Texture texture = original.HasProperty("_BaseMap") ? original.GetTexture("_BaseMap") : original.mainTexture;
+            if (texture != null)
+            {
+                properties.SetTexture("_BaseMap", texture);
+            }
+        }
+        properties.SetFloat("_Opacity", sealedHand ? sealOpacity : 1);
+        properties.SetFloat("_Rainbow", defended ? 1 : 0);
+        properties.SetFloat("_Selected", selected && !defended ? 1 : 0);
+        properties.SetFloat("_RainbowSpeed", rainbowSpeed);
+        myRenderer.SetPropertyBlock(properties);
+    }
+
+    private void OnDestroy()
+    {
+        if (view != null)
+        {
+            view.Changed -= Apply;
+        }
+        if (interaction != null)
+        {
+            interaction.Changed -= Apply;
+        }
+        if (opaqueInstance != null)
+        {
+            Destroy(opaqueInstance);
+            Destroy(transparentInstance);
         }
     }
 }
+
+//削除:T04移行前の実装を参照用に保存する。
+//using UnityEngine;
+//
+//public class HandHighlight : MonoBehaviour
+//{
+//    //SkinnedMeshRendererも取得できるように、親クラスである汎用的な「Renderer」を使用する
+//    Renderer myRenderer;
+//    Material[] originalMaterials; //元のマテリアル配列を保存
+//
+//    [Header("選択時のマテリアル")]
+//    public Material selectMaterial;
+//
+//    void Awake()
+//    {
+//        //Rendererを取得するように変更
+//        myRenderer = GetComponent<Renderer>();
+//
+//        //エラー防止：もしアタッチし間違えても落ちないようにする
+//        if (myRenderer == null) return;
+//
+//        //元のマテリアルをすべて取得して保存
+//        originalMaterials = myRenderer.materials;
+//    }
+//
+//    //ハイライトをオン・オフする
+//    public void SetHighlight(bool on)
+//    {
+//        //エラー回避：マテリアルがセットされていなければ何もしない
+//        if (myRenderer == null || selectMaterial == null) return;
+//
+//        if (on)
+//        {
+//            //マテリアルをすべて「選択用マテリアル」に完全置換する
+//            Material[] selectedMats = new Material[originalMaterials.Length];
+//            for (int i = 0; i < originalMaterials.Length; i++)
+//            {
+//                selectedMats[i] = selectMaterial;
+//            }
+//            myRenderer.materials = selectedMats;
+//        }
+//        else
+//        {
+//            //元のマテリアル配列に戻す
+//            myRenderer.materials = originalMaterials;
+//        }
+//    }
+//}
