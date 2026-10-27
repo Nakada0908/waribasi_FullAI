@@ -45,7 +45,12 @@ namespace Waribasi.Presentation
         public MatchSelectionMode Mode { get; private set; }
         public HandCard SelectedCard { get; private set; }
         public bool HistoryOpen { get; private set; }
-        public bool CanInteract => view != null && view.CanAct && !HistoryOpen;
+        //追加:退出確認中は盤面・札のローカル入力だけを止める。
+        public bool ModalBlocked { get; private set; }
+        //変更:確認モーダルを通常操作の受付条件へ含める。
+        public bool CanInteract => view != null && view.CanAct && !HistoryOpen && !ModalBlocked;
+        //削除:履歴だけを考慮していた条件。
+        //public bool CanInteract => view != null && view.CanAct && !HistoryOpen;
         public bool HasSelection => Mode != MatchSelectionMode.None;
         public IReadOnlyList<GameAction> LegalActions => legalActions;
         public string Message => message;
@@ -329,6 +334,14 @@ namespace Waribasi.Presentation
         public void SetHistoryOpen(bool open)
         {
             HistoryOpen = open;
+            ClearSelection();
+            PublishSelection();
+        }
+
+        //追加:確認UIを開くと未確定選択を破棄し、成立済みの処理は戻さない。
+        public void SetModalBlocked(bool blocked)
+        {
+            ModalBlocked = blocked;
             ClearSelection();
             PublishSelection();
         }

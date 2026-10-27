@@ -35,6 +35,11 @@ namespace Waribasi.Presentation.PlayTests
         private PointerClickProbe board;
         private int uiClicks;
         private Vector2 center;
+        //追加:非表示のバッチ実行でも検証用入力を受け取り、終了時に元へ戻す。
+        private InputSettings.BackgroundBehavior savedBackground;
+#if UNITY_EDITOR
+        private InputSettings.EditorInputBehaviorInPlayMode savedEditorRouting;
+#endif
 
         private static Type RuntimeType(string name)
         {
@@ -51,6 +56,13 @@ namespace Waribasi.Presentation.PlayTests
         [UnitySetUp]
         public IEnumerator SetUp()
         {
+            //追加:Game Viewのフォーカスに依存せず、同じポインター経路を検証する。
+            savedBackground = InputSystem.settings.backgroundBehavior;
+            InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+#if UNITY_EDITOR
+            savedEditorRouting = InputSystem.settings.editorInputBehaviorInPlayMode;
+            InputSystem.settings.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+#endif
             otherSystems = UnityEngine.Object.FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
             foreach (var system in otherSystems)
             {
@@ -127,6 +139,11 @@ namespace Waribasi.Presentation.PlayTests
                     system.enabled = true;
                 }
             }
+            //追加:検証のための受付設定を保存していた値へ戻す。
+            InputSystem.settings.backgroundBehavior = savedBackground;
+#if UNITY_EDITOR
+            InputSystem.settings.editorInputBehaviorInPlayMode = savedEditorRouting;
+#endif
         }
 
         private void MouseEvent(Vector2 position, bool pressed)

@@ -52,6 +52,21 @@ namespace Waribasi.Networking
         private double Now => NetworkManager.ServerTime.Time;
         public MatchClientState ClientState => view;
 
+        //追加:T05の開始前取消だけを正式な中断へ接続する。
+        public bool CancelPreparationFromSession()
+        {
+            if (!IsServer || (authority != null && authority.State.MatchPhase != MatchPhase.Preparing))
+            {
+                return false;
+            }
+            preparationStage = -1;
+            if (authority != null && authority.Interrupt(Now))
+            {
+                Publish();
+            }
+            return true;
+        }
+
         //T05は接続開始前に設定する。試合中の変更には使わない。
         public static void ConfigureNextMatch(bool randomMatch, FirstPlayerChoice first = FirstPlayerChoice.Random,
             int turnSeconds = 30)
@@ -126,6 +141,11 @@ namespace Waribasi.Networking
 
         private void ServerUpdate()
         {
+            //追加:取消後に準備・配布を再開しない。
+            if (preparationStage < 0)
+            {
+                return;
+            }
             if (authority == null)
             {
                 TryPrepare();
@@ -158,7 +178,17 @@ namespace Waribasi.Networking
                 (resultReceipts.Count == 2 || now - endedAt >= ResultReceiptTimeoutSeconds))
             {
                 loadingEnd = true;
-                NetworkManager.SceneManager.LoadScene("End", LoadSceneMode.Single);
+                //変更:常駐セッションにScene遷移を集約し、Endでも再戦を扱う。
+                if (OnlineSessionController.Instance != null)
+                {
+                    OnlineSessionController.Instance.QueueResultScene();
+                }
+                else
+                {
+                    NetworkManager.SceneManager.LoadScene("End", LoadSceneMode.Single);
+                }
+                //削除:常駐管理ありの場合も直接ロードしていた処理。
+                //NetworkManager.SceneManager.LoadScene("End", LoadSceneMode.Single);
             }
         }
 
@@ -228,6 +258,8 @@ namespace Waribasi.Networking
             }
             if (state.matchPhase == (int)MatchPhase.Preparing && readySentVersion != state.stateVersion &&
                 Time.realtimeSinceStartupAsDouble - receivedAt >= 0.25 && IsLocalDisplayReady() &&
+                //追加:先後手・配布の表示を終えてから双方の準備を通知する。
+                Waribasi.Presentation.MatchFlowPresenter.CanAcknowledgePreparation(state) &&
                 (state.stateVersion == 0 || view.HandIsCurrent))
             {
                 readySentVersion = state.stateVersion;
