@@ -22,6 +22,52 @@ namespace Waribasi.Npc
 
     public static class NpcCandidateGenerator
     {
+        //追加:観測から作った仮想局面だけを内部で受け取り、カード適用も予算に数えて逐次列挙する。
+        internal static IEnumerable<NpcCandidate> EnumerateSimulation(RuleEngine engine, PlayerId player,
+            NpcSearchBudget budget)
+        {
+            foreach (var candidate in EnumerateNormal(engine, player, null, budget))
+            {
+                yield return candidate;
+            }
+            foreach (var card in engine.GetLegalActions(player).OfType<UseCardAction>())
+            {
+                if (!budget.Spend(true))
+                {
+                    yield break;
+                }
+                var position = engine.Fork();
+                bool accepted = position.TryApply(player, card, position.Snapshot.StateVersion).Accepted;
+                yield return null;
+                if (accepted)
+                {
+                    foreach (var candidate in EnumerateNormal(position, player, card, budget))
+                    {
+                        yield return candidate;
+                    }
+                }
+            }
+        }
+
+        //追加:1回の列挙で通常行動を1件だけ仮想適用する。
+        private static IEnumerable<NpcCandidate> EnumerateNormal(RuleEngine engine, PlayerId player,
+            UseCardAction card, NpcSearchBudget budget)
+        {
+            foreach (var normal in engine.GetLegalActions(player).Where(action => !(action is UseCardAction)))
+            {
+                if (!budget.Spend(true))
+                {
+                    yield break;
+                }
+                var position = engine.Fork();
+                if (position.TryApply(player, normal, position.Snapshot.StateVersion).Accepted)
+                {
+                    budget.Statistics.Candidates++;
+                    yield return new NpcCandidate(card, normal, position);
+                }
+            }
+        }
+
         public static IReadOnlyList<NpcCandidate> Generate(PlayerObservation observation, ulong simulationSeed)
         {
             var engine = NpcSimulation.Create(observation, simulationSeed);

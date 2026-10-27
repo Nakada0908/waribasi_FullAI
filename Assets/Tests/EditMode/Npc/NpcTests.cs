@@ -191,10 +191,16 @@ namespace Waribasi.Npc.Tests
         }
 
         [Test]
-        public void AdvancedCannotBeSilentlyReplaced()
+        //変更:上級が中級への読み替えなしで同じ正式進行を開始できる。
+        public void AdvancedUsesTheCommonLocalSession()
         {
-            Assert.Throws<ArgumentException>(() => new LocalMatchSession(
-                new NpcMatchSetup(NpcDifficulty.Advanced, NpcFirstPlayerChoice.Random), PlayerId.PlayerA));
+            //削除:実装前の上級拒否テスト。
+            //Assert.Throws<ArgumentException>(() => new LocalMatchSession(
+            //    new NpcMatchSetup(NpcDifficulty.Advanced, NpcFirstPlayerChoice.Random), PlayerId.PlayerA));
+            var session = new LocalMatchSession(new NpcMatchSetup(NpcDifficulty.Advanced, NpcFirstPlayerChoice.Npc), PlayerId.PlayerA);
+            Assert.That(session.Setup.Difficulty, Is.EqualTo(NpcDifficulty.Advanced));
+            Assert.That(session.Authority.State.CurrentPlayer, Is.EqualTo(session.Npc));
+            Assert.That(session.Authority.TurnSeconds, Is.Zero);
         }
 
         [Test]

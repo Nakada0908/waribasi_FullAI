@@ -14,10 +14,12 @@ namespace Waribasi.MatchFlow
         public LocalMatchSession(NpcMatchSetup setup, PlayerId randomFirst)
         {
             Setup = setup ?? throw new ArgumentNullException(nameof(setup));
-            if (setup.Difficulty == NpcDifficulty.Advanced)
-            {
-                throw new ArgumentException("Advanced NPC is not implemented.", nameof(setup));
-            }
+            //変更:上級も共通のローカル進行で開始する。
+            //削除:上級未実装時の構築拒否を保存する。
+            //if (setup.Difficulty == NpcDifficulty.Advanced)
+            //{
+            //    throw new ArgumentException("Advanced NPC is not implemented.", nameof(setup));
+            //}
             Restart(randomFirst);
         }
 

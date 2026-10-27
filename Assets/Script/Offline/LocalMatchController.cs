@@ -23,6 +23,16 @@ namespace Waribasi.Presentation
         private readonly List<string> recentBoards = new List<string>();
         private RuleRandom choices;
         private Coroutine thinking;
+        //追加:上級の探索と推定は試合単位、予算はカード後も同じ手番で共有する。
+        private AdvancedNpc advancedThinking;
+        private OpponentHandEstimator handEstimator;
+        private long thinkingTurn = -1;
+        private double turnThinkStarted;
+        private int turnApplications;
+        public NpcSearchStatistics LastSearchStatistics { get; private set; }
+        public double LastThinkWallMilliseconds { get; private set; }
+        public double LastTurnThinkMilliseconds { get; private set; }
+        public bool IsThinking => thinking != null;
         private bool loading;
         private bool preparing;
         private int generation;
@@ -54,14 +64,21 @@ namespace Waribasi.Presentation
             DontDestroyOnLoad(gameObject);
             NpcMatchEntry.Register(StartNpc);
             SceneManager.sceneLoaded += OnSceneLoaded;
+            //追加:外部のScene遷移でも古い探索を停止する。
+            SceneManager.sceneUnloaded += OnSceneUnloaded;
         }
 
         private void OnDestroy()
         {
             if (Instance == this)
             {
+                //追加:破棄後に探索結果や仮説を残さない。
+                generation++;
+                StopThinking();
                 NpcMatchEntry.Unregister(StartNpc);
                 SceneManager.sceneLoaded -= OnSceneLoaded;
+                //追加:探索寿命の購読を解除する。
+                SceneManager.sceneUnloaded -= OnSceneUnloaded;
                 Instance = null;
             }
         }
@@ -80,10 +97,12 @@ namespace Waribasi.Presentation
             {
                 return NpcStartResult.Busy;
             }
-            if (setup.Difficulty == NpcDifficulty.Advanced)
-            {
-                return NpcStartResult.UnsupportedDifficulty;
-            }
+            //変更:上級も専用探索へ接続して開始する。
+            //削除:上級未実装時の開始拒否を保存する。
+            //if (setup.Difficulty == NpcDifficulty.Advanced)
+            //{
+            //    return NpcStartResult.UnsupportedDifficulty;
+            //}
             if (leftHandPrefab == null || rightHandPrefab == null || cameraPrefab == null)
             {
                 return NpcStartResult.NotConnected;
@@ -102,6 +121,12 @@ namespace Waribasi.Presentation
             StopThinking();
             generation++;
             choices = RuleRandom.Create();
+            //追加:再戦で推定と手番予算を初期化する。
+            handEstimator = new OpponentHandEstimator();
+            thinkingTurn = -1;
+            turnApplications = 0;
+            LastSearchStatistics = null;
+            LastThinkWallMilliseconds = LastTurnThinkMilliseconds = 0;
             LastThinkMilliseconds = 0;
             LastCandidateCount = 0;
             recentBoards.Clear();
@@ -116,6 +141,8 @@ namespace Waribasi.Presentation
 
         private void Load(string scene)
         {
+            //追加:Scene読み込み中に探索を継続しない。
+            StopThinking();
             loading = true;
             SceneManager.LoadSceneAsync(scene);
             Changed?.Invoke();
@@ -206,34 +233,123 @@ namespace Waribasi.Presentation
             }
         }
 
+        //追加:Scene離脱時は、正式適用を待たずに探索を破棄する。
+        private void OnSceneUnloaded(Scene scene)
+        {
+            if (scene.name == "Game")
+            {
+                generation++;
+                StopThinking();
+            }
+        }
+
+        //追加:無効化中の探索を残さない。
+        private void OnDisable()
+        {
+            generation++;
+            StopThinking();
+        }
+
+        //変更:難易度を明示し、上級はフレームごとに探索を進める。
         private IEnumerator Think(int epoch)
         {
             var authority = Session.Authority;
             var match = authority.MatchId;
             var observation = authority.GetObservation(Session.Npc);
-            yield return new WaitForSecondsRealtime(0.3f);
+            //変更:カード後には初期待機と手番全体の予算をリセットしない。
+            bool newTurn = thinkingTurn != observation.PublicState.TurnNumber;
+            if (newTurn)
+            {
+                thinkingTurn = observation.PublicState.TurnNumber;
+                turnThinkStarted = Now;
+                turnApplications = 0;
+            }
+            double calledAt = Now;
+            //削除:カード後も繰り返していた待機。
+            //yield return new WaitForSecondsRealtime(0.3f);
+            yield return new WaitForSecondsRealtime(newTurn ? 0.3f : 0);
+            if (!CanThink(epoch, match, observation.PublicState.StateVersion))
+            {
+                thinking = null;
+                yield break;
+            }
             var timer = Stopwatch.StartNew();
-            GameAction action;
+            GameAction action = null;
             if (Session.Setup.Difficulty == NpcDifficulty.Beginner)
             {
                 action = BeginnerNpc.Choose(observation, ref choices, beginnerCardPercent);
                 LastCandidateCount = 0;
             }
-            else
+            //変更:中級へ流れる条件を明示する。
+            //削除:従来はBeginner以外が中級だった。
+            //else
+            else if (Session.Setup.Difficulty == NpcDifficulty.Intermediate)
             {
                 var decision = IntermediateNpc.Choose(observation, ref choices, recentBoards);
                 action = decision.Action;
                 LastCandidateCount = decision.CandidateCount;
             }
+            //追加:上級は観測だけを渡し、各処理片の前に現在の試合・版・手番を検証する。
+            else if (Session.Setup.Difficulty == NpcDifficulty.Advanced)
+            {
+                var options = new NpcSearchOptions
+                {
+                    MaxMilliseconds = Math.Max(1, Math.Min(600, (turnThinkStarted + 1 - Now) * 1000)),
+                    MaxApplications = Math.Max(1, 40000 - turnApplications)
+                };
+                advancedThinking = new AdvancedNpc(observation, choices, options, recentBoards, handEstimator);
+                while (!advancedThinking.IsComplete)
+                {
+                    if (!CanThink(epoch, match, observation.PublicState.StateVersion))
+                    {
+                        StopThinking();
+                        yield break;
+                    }
+                    advancedThinking.Advance();
+                    if (!advancedThinking.IsComplete)
+                    {
+                        yield return null;
+                    }
+                }
+                action = advancedThinking.Decision.Action;
+                choices = advancedThinking.ChoiceRandom;
+                LastSearchStatistics = advancedThinking.Statistics;
+                turnApplications += LastSearchStatistics.Applications;
+                LastCandidateCount = LastSearchStatistics.Candidates;
+                LastThinkMilliseconds = LastSearchStatistics.CpuMilliseconds;
+                advancedThinking.Dispose();
+                advancedThinking = null;
+            }
             timer.Stop();
-            LastThinkMilliseconds = timer.Elapsed.TotalMilliseconds;
+            //変更:上級のCPU時間とフレーム待ち込みの時間を区別する。
+            //削除:同期思考のみの計測。
+            //LastThinkMilliseconds = timer.Elapsed.TotalMilliseconds;
+            if (Session.Setup.Difficulty != NpcDifficulty.Advanced)
+            {
+                LastThinkMilliseconds = timer.Elapsed.TotalMilliseconds;
+            }
+            LastThinkWallMilliseconds = (Now - calledAt) * 1000;
+            LastTurnThinkMilliseconds = (Now - turnThinkStarted) * 1000;
             thinking = null;
-            if (Active && epoch == generation && authority.MatchId == match && !IsWorking && action != null &&
-                authority.State.StateVersion == observation.PublicState.StateVersion &&
-                authority.State.CurrentPlayer == Session.Npc && authority.Gate == InputGate.Accepting)
+            //変更:現在のSessionを検証し、古いAuthorityだけの比較にしない。
+            //削除:従来の適用前条件を保存する。
+            //if (Active && epoch == generation && authority.MatchId == match && !IsWorking && action != null &&
+            //    authority.State.StateVersion == observation.PublicState.StateVersion &&
+            //    authority.State.CurrentPlayer == Session.Npc && authority.Gate == InputGate.Accepting)
+            if (action != null && CanThink(epoch, match, observation.PublicState.StateVersion))
             {
                 Apply(Session.Npc, action, observation.PublicState.StateVersion);
             }
+        }
+
+        //追加:分割探索の開始・再開・正式適用に同じ寿命条件を使う。
+        private bool CanThink(int epoch, Guid match, long version)
+        {
+            return Active && epoch == generation && isActiveAndEnabled && !IsWorking &&
+                SceneManager.GetActiveScene().name == "Game" && Session.Authority.MatchId == match &&
+                Session.Authority.State.MatchPhase == MatchPhase.Active &&
+                Session.Authority.State.StateVersion == version &&
+                Session.Authority.State.CurrentPlayer == Session.Npc && Session.Authority.Gate == InputGate.Accepting;
         }
 
         public bool Send(GameAction action, long version)
@@ -347,6 +463,8 @@ namespace Waribasi.Presentation
             }
             leaving = true;
             generation++;
+            //追加:退出時に分割探索も破棄する。
+            StopThinking();
             StopAllCoroutines();
             thinking = null;
             NpcMatchEntry.ReturnToPreparation = destination == "StartGame";
@@ -367,6 +485,9 @@ namespace Waribasi.Presentation
 
         private void StopThinking()
         {
+            //追加:停止した探索の結果は次回の試合や思考へ引き継がない。
+            advancedThinking?.Dispose();
+            advancedThinking = null;
             if (thinking != null)
             {
                 StopCoroutine(thinking);

@@ -236,9 +236,12 @@ namespace Waribasi.Presentation
             Highlight(difficultyButtons, difficulty);
             Highlight(npcFirstButtons, npcFirst);
             //追加:実装済みの難易度と、T07へ渡す上級の準備状況を表示する。
+            //変更:通常3難易度のオフライン開始を表示する。
             if (Page == SetupPage.Npc)
             {
-                npcMessage.text = difficulty == (int)NpcDifficulty.Advanced ? "上級は準備中です" : "ネット接続なしで遊べます";
+                //削除:上級未実装時の表示を保存する。
+                //npcMessage.text = difficulty == (int)NpcDifficulty.Advanced ? "上級は準備中です" : "ネット接続なしで遊べます";
+                npcMessage.text = "ネット接続なしで遊べます";
             }
         }
 
