@@ -125,6 +125,12 @@ namespace Waribasi.MatchFlow
         public const int HistoryPageSize = 8;
         public const int MaximumServerMessageCharacters = 16384;
 
+        //追加:ローカル表示では接続IDを割り当てず、本人の席は進行側から直接渡す。
+        public static PublicMatchMessage LocalPublic(MatchAuthority authority, int stage, double now)
+        {
+            return Public(authority, 0, 0, stage, now);
+        }
+
         public static PublicMatchMessage Public(MatchAuthority authority, ulong clientA, ulong clientB,
             int preparationStage, double now)
         {

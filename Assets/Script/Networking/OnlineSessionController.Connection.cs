@@ -61,7 +61,8 @@ namespace Waribasi.Networking
 
         private async Task ConnectAsync(MatchSetup setup, string code, bool host)
         {
-            if (IsWorking || HasSession || (manager != null && manager.IsListening))
+            //変更:NPC戦の終了前に別のオンライン接続を開始しない。
+            if ((Waribasi.Presentation.MatchSessionAccess.IsLocal) || IsWorking || HasSession || (manager != null && manager.IsListening))
             {
                 return;
             }
@@ -480,3 +481,6 @@ namespace Waribasi.Networking
         }
     }
 }
+
+//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
+//if (IsWorking || HasSession || (manager != null && manager.IsListening))

@@ -46,13 +46,15 @@ namespace Waribasi.Presentation
 
         private void Update()
         {
-            if (view != MatchClientState.Instance)
+            //変更:ローカルとオンラインで現在の表示状態を切り替える。
+            if (view != MatchSessionAccess.State)
             {
                 if (view != null)
                 {
                     view.Changed -= Refresh;
                 }
-                view = MatchClientState.Instance;
+                //変更:現在のモードの確定状態を購読する。
+                view = MatchSessionAccess.State;
                 if (view != null)
                 {
                     view.Changed += Refresh;
@@ -78,7 +80,8 @@ namespace Waribasi.Presentation
                 {
                     surrenderPending = false;
                 }
-                else if (!view.HasPendingRequest && MatchNetworkController.Instance != null && MatchNetworkController.Instance.SendSurrender())
+                //変更:降参を各モードの正式な終了入口へ渡す。
+                else if (!view.HasPendingRequest && MatchSessionAccess.Surrender())
                 {
                     surrenderPending = false;
                     CloseMenu();
@@ -117,7 +120,8 @@ namespace Waribasi.Presentation
             menuPanel.SetActive(true);
             menuChoices.SetActive(true);
             confirmationChoices.SetActive(false);
-            confirmationText.text = SceneManager.GetActiveScene().name == "Game" ? "対戦メニュー\n操作時間は進みます" : "終了メニュー";
+            //変更:時間制限のないNPC戦には操作時計の説明を表示しない。
+            confirmationText.text = SceneManager.GetActiveScene().name == "Game" ? (MatchSessionAccess.IsLocal ? "対戦メニュー" : "対戦メニュー\n操作時間は進みます") : "終了メニュー";
             Refresh();
         }
 
@@ -149,7 +153,8 @@ namespace Waribasi.Presentation
         {
             OpenMenu();
             confirmation = action;
-            confirmationText.text = text + (IsActiveMatch() ? "\n操作時間は進みます" : "");
+            //変更:NPCの確認画面も時間制限なしの表示に揃える。
+            confirmationText.text = text + (IsActiveMatch() && !MatchSessionAccess.IsLocal ? "\n操作時間は進みます" : "");
             menuChoices.SetActive(false);
             confirmationChoices.SetActive(true);
         }
@@ -173,25 +178,43 @@ namespace Waribasi.Presentation
                     return;
                 }
                 surrenderPending = true;
-                confirmationText.text = "操作の応答を待っています\n操作時間は進みます";
+                //変更:ローカル処理とオンラインの応答待ちを区別する。
+                confirmationText.text = (MatchSessionAccess.IsLocal ? "操作を確定しています" : "操作の応答を待っています\n操作時間は進みます");
                 confirmationChoices.SetActive(false);
             }
             else
             {
                 string destination = confirmation;
                 CloseMenu();
-                OnlineSessionController.Ensure().RequestLeave(destination);
+                //変更:NPCはオンライン退出を経由しない。
+                MatchSessionAccess.Leave(destination);
             }
         }
 
         public void CancelPreparation()
         {
-            session?.CancelPreparation();
+            //変更:NPC準備は勝敗を付けずに設定へ戻す。
+            if (MatchSessionAccess.IsLocal)
+            {
+                MatchSessionAccess.Local.Leave("StartGame");
+            }
+            else
+            {
+                session?.CancelPreparation();
+            }
         }
 
         public void Rematch()
         {
-            session?.RequestRematch(!session.LocalRematch);
+            //変更:NPCの再戦は人間の操作だけで開始する。
+            if (MatchSessionAccess.IsLocal)
+            {
+                MatchSessionAccess.Local.Rematch();
+            }
+            else
+            {
+                session?.RequestRematch(!session.LocalRematch);
+            }
         }
 
         public void ReturnMode()
@@ -202,7 +225,8 @@ namespace Waribasi.Presentation
             }
             else
             {
-                OnlineSessionController.Ensure().RequestLeave("StartGame");
+                //変更:現在の対戦モードから準備へ戻る。
+                MatchSessionAccess.Leave("StartGame");
             }
         }
 
@@ -214,7 +238,8 @@ namespace Waribasi.Presentation
             }
             else
             {
-                OnlineSessionController.Ensure().RequestLeave("Title");
+                //変更:現在の対戦モードを終了してタイトルへ戻る。
+                MatchSessionAccess.Leave("Title");
             }
         }
 
@@ -242,14 +267,17 @@ namespace Waribasi.Presentation
         private void Refresh()
         {
             var state = view?.Public;
+            //追加:NPC用の待機と再戦表示を選ぶ。
+            bool local = MatchSessionAccess.IsLocal;
             bool active = IsActiveMatch();
             if (preparationText != null)
             {
-                string order = state == null ? "通信と盤面を準備しています" :
+                string order = state == null ? (local ? "盤面を準備しています" : "通信と盤面を準備しています") :
                     (state.currentPlayer == view.LocalPlayer ? "自分が先手 ／ 相手が後手" : "相手が先手 ／ 自分が後手");
                 preparationText.text = order + "\n" + (state == null ? "" : "毎手番：" + MatchSetupPresenter.TimeLabel(state.turnSeconds)) +
-                    "\n" + (state != null && state.initialCardsDealt ? "初期手札を配りました。双方の準備を待っています" : "双方の準備完了後に手札を配ります");
-                preparationCancel.interactable = session != null && !session.IsWorking;
+                    "\n" + (state != null && state.initialCardsDealt ? (local ? "初期手札を配りました。対戦を開始します" : "初期手札を配りました。双方の準備を待っています") : (local ? "これから初期手札を配ります" : "双方の準備完了後に手札を配ります"));
+                //変更:NPC準備中の取消も有効にする。
+                preparationCancel.interactable = local || (session != null && !session.IsWorking);
             }
             surrenderChoice.gameObject.SetActive(active);
             if (menuButton != null)
@@ -263,6 +291,14 @@ namespace Waribasi.Presentation
             if (resultDetail != null)
             {
                 resultDetail.text = ResultReason(view);
+                //変更:NPCの結果には相手の接続や合意を要求しない。
+                if (local)
+                {
+                    rematchButton.interactable = MatchSessionAccess.Local.CanRematch;
+                    rematchLabel.text = "同じ設定で再戦";
+                    rematchStatus.text = MatchSessionAccess.Local.IsWorking ? "次の対戦を準備しています" : "自分の操作だけで再戦できます";
+                    return;
+                }
                 bool can = session != null && session.CanRematch;
                 rematchButton.interactable = can;
                 rematchLabel.text = session != null && session.LocalRematch ? "再戦待ちを取り消す" : "同じ相手と再戦";
@@ -275,3 +311,19 @@ namespace Waribasi.Presentation
         }
     }
 }
+
+//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
+//view != MatchClientState.Instance
+//view = MatchClientState.Instance;
+//!view.HasPendingRequest && MatchNetworkController.Instance != null && MatchNetworkController.Instance.SendSurrender()
+//OnlineSessionController.Ensure().RequestLeave(destination);
+//OnlineSessionController.Ensure().RequestLeave("StartGame");
+//OnlineSessionController.Ensure().RequestLeave("Title");
+//            session?.CancelPreparation();
+//            session?.RequestRematch(!session.LocalRematch);
+//"対戦メニュー\n操作時間は進みます"
+//(IsActiveMatch() ? "\n操作時間は進みます" : "")
+//"操作の応答を待っています\n操作時間は進みます"
+//state == null ? "通信と盤面を準備しています"
+//"初期手札を配りました。双方の準備を待っています" : "双方の準備完了後に手札を配ります"
+//preparationCancel.interactable = session != null && !session.IsWorking;

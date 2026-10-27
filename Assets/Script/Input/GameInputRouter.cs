@@ -35,6 +35,17 @@ namespace Waribasi.Presentation
             Instance = this;
         }
 
+        //追加:プロジェクト全体で有効なPointを、新しいSceneのUIへ再通知する。
+        private void Start()
+        {
+            var point = GetComponent<InputSystemUIInputModule>()?.point?.action;
+            if (point != null && point.enabled && (Mouse.current != null || Pen.current != null))
+            {
+                point.Disable();
+                point.Enable();
+            }
+        }
+
         private void OnDestroy()
         {
             if (Instance == this)

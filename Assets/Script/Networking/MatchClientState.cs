@@ -7,7 +7,8 @@ using Waribasi.Rules;
 
 namespace Waribasi.Networking
 {
-    //NetworkManagerと同じ寿命で、受信済みの確定結果をGameシーン破棄後も保持する。
+    //変更:各モードの進行管理と同じ寿命で、確定結果をGameシーン破棄後も保持する。
+    //削除:NetworkManagerと同じ寿命で、受信済みの確定結果をGameシーン破棄後も保持する。
     public sealed class MatchClientState : MonoBehaviour
     {
         public static MatchClientState Instance { get; private set; }
@@ -46,12 +47,34 @@ namespace Waribasi.Networking
 
         public void ResetForNewMatch()
         {
+            //追加:モードを切り替えた既存表示状態も現在の参照へ戻す。
+            Instance = this;
             Public = null;
             own = null;
             cards = Array.Empty<HandCard>();
             history.Clear();
             nextRequest = 1;
             LocalPlayer = -1;
+            HasPendingRequest = false;
+            CommunicationInterrupted = false;
+            Changed?.Invoke();
+        }
+
+        //追加:ローカル進行側が確定した本人の席と観測だけを表示へ反映する。
+        internal void ApplyLocal(MatchAuthority authority, PlayerId player, int stage, double now)
+        {
+            if (HasConfirmedResult)
+            {
+                return;
+            }
+            Public = MatchMessages.LocalPublic(authority, stage, now);
+            LocalPlayer = (int)player;
+            own = MatchMessages.OwnHand(authority, player);
+            cards = Array.AsReadOnly(own.cards.Select(card => card.ToCard()).ToArray());
+            while (history.Count < authority.State.CardHistory.Count)
+            {
+                history.AddRange(MatchMessages.History(authority, history.Count).records);
+            }
             HasPendingRequest = false;
             CommunicationInterrupted = false;
             Changed?.Invoke();

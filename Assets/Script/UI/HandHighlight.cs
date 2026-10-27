@@ -20,7 +20,8 @@ public class HandHighlight : MonoBehaviour
     private Material opaqueInstance;
     private Material transparentInstance;
     private MaterialPropertyBlock properties;
-    private NetworkObject hand;
+    //変更:状態表示の対象を共通の手識別で保持する。
+    private MatchHandView hand;
     private HandRL side;
     //追加:マーカーは手札に隠れる腕中央ではなく、既存の接触位置を基準にする。
     private Transform markerAnchor;
@@ -38,8 +39,9 @@ public class HandHighlight : MonoBehaviour
         }
         originalMaterials = myRenderer.sharedMaterials;
         properties = new MaterialPropertyBlock();
-        hand = GetComponentInParent<NetworkObject>();
-        side = hand != null ? hand.GetComponent<HandRL>() : null;
+        //変更:ローカル手にはNetworkObjectを要求しない。
+        side = GetComponentInParent<HandRL>();
+        hand = side != null ? side.GetComponent<MatchHandView>() ?? side.gameObject.AddComponent<MatchHandView>() : null;
         markerAnchor = hand != null ? hand.transform.Find("targetpos") : null;
         if (stateOpaque != null)
         {
@@ -51,10 +53,18 @@ public class HandHighlight : MonoBehaviour
 
     private void Update()
     {
-        if (view == null && MatchClientState.Instance != null)
+        //変更:モードの表示状態を再購読し、古い状態へ購読を残さない。
+        if (view != MatchSessionAccess.State)
         {
-            view = MatchClientState.Instance;
-            view.Changed += Apply;
+            if (view != null)
+            {
+                view.Changed -= Apply;
+            }
+            view = MatchSessionAccess.State;
+            if (view != null)
+            {
+                view.Changed += Apply;
+            }
             Apply();
         }
         if (interaction == null && MatchInteractionController.Instance != null)
@@ -97,14 +107,14 @@ public class HandHighlight : MonoBehaviour
         {
             return;
         }
-        bool selected = interaction != null ? interaction.IsHandSelected(hand) : legacySelection;
+        bool selected = interaction != null ? interaction.IsMatchHandSelected(hand) : legacySelection;
         bool defended = false;
         bool sealedHand = false;
         bool alive = true;
-        if (view?.Public != null && hand != null && side != null)
+        //変更:公開盤面の席と左右を使い、相手の非公開情報を参照しない。
+        if (view?.Public != null && hand != null && hand.ResolvePlayer(view, out var player))
         {
-            int player = hand.OwnerClientId == view.Public.playerAClientId ? 0 : 1;
-            int index = player * 2 + (int)MatchClientState.ToSide(side.handType);
+            int index = (int)player * 2 + (int)hand.Side;
             var state = view.Public.hands[index];
             alive = state.count != 0;
             defended = state.defenseUntil != 0;
@@ -215,3 +225,19 @@ public class HandHighlight : MonoBehaviour
 //        }
 //    }
 //}
+
+//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
+//    private NetworkObject hand;
+//        hand = GetComponentInParent<NetworkObject>();
+//        side = hand != null ? hand.GetComponent<HandRL>() : null;
+//        if (view == null && MatchClientState.Instance != null)
+//        {
+//            view = MatchClientState.Instance;
+//            view.Changed += Apply;
+//            Apply();
+//        }
+//interaction.IsHandSelected(hand)
+//        if (view?.Public != null && hand != null && side != null)
+//        {
+//            int player = hand.OwnerClientId == view.Public.playerAClientId ? 0 : 1;
+//            int index = player * 2 + (int)MatchClientState.ToSide(side.handType);

@@ -11,7 +11,8 @@ public class ResultUI : NetworkBehaviour
 
     private void Start()
     {
-        view = MatchClientState.Instance;
+        //変更:ローカル対戦も同じ確定勝敗を表示する。
+        view = Waribasi.Presentation.MatchSessionAccess.State;
         if (view != null)
         {
             view.Changed += Refresh;
@@ -103,3 +104,7 @@ public class ResultUI : NetworkBehaviour
 ////        }
 ////    }
 ////}
+
+//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
+//
+//        view = MatchClientState.Instance;

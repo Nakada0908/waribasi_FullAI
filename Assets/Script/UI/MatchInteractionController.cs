@@ -35,7 +35,8 @@ namespace Waribasi.Presentation
         private RuleActionQuery query;
         private IReadOnlyList<GameAction> legalActions = Array.Empty<GameAction>();
         private readonly List<GameAction> options = new List<GameAction>();
-        private NetworkObject attackSource;
+        //変更:手の選択は通信上のオブジェクトではなく共通の席と左右で保持する。
+        private MatchHandView attackSource;
         private GameAction selectedAction;
         private string selectedMatch;
         private long selectedVersion;
@@ -74,9 +75,10 @@ namespace Waribasi.Presentation
 
         private void Update()
         {
-            if (view == null && MatchClientState.Instance != null)
+            if (view != MatchSessionAccess.State)
             {
-                Bind(MatchClientState.Instance);
+                //変更:モード変更時は古い状態の購読を解除して接続し直す。
+                Bind(MatchSessionAccess.State);
             }
         }
 
@@ -154,14 +156,23 @@ namespace Waribasi.Presentation
             selectedVersion = view.Public.stateVersion;
         }
 
+        //変更:従来のオンライン呼出しを共通手識別へ転送する。
         public void SelectHand(NetworkObject hand)
         {
-            if (!CanInteract || hand == null || !hand.IsSpawned || hand.GetComponent<HandRL>() == null)
+            SelectMatchHand(hand != null ? hand.GetComponent<MatchHandView>() : null);
+        }
+
+        //追加:人間とNPCの表示手を同じ選択・合法性判定へ通す。
+        public void SelectMatchHand(MatchHandView hand)
+        {
+            //変更:オンライン入力には引き続き実際のSpawnを要求し、表示照会とは分ける。
+            if (!CanInteract || hand == null || !hand.TryGetPlayer(out var player) ||
+                (!MatchSessionAccess.IsLocal && hand.NetworkHand?.IsSpawned != true))
             {
                 return;
             }
-            HandSide side = MatchClientState.ToSide(hand.GetComponent<HandRL>().handType);
-            bool own = hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
+            HandSide side = hand.Side;
+            bool own = (int)player == view.LocalPlayer;
             if (Mode == MatchSelectionMode.Card)
             {
                 if (SelectedCard.Definition.NeedsHand && own == SelectedCard.Definition.IsSelf)
@@ -193,10 +204,12 @@ namespace Waribasi.Presentation
             }
             else if (Mode == MatchSelectionMode.Attack && attackSource != null)
             {
-                var action = new AttackAction(MatchClientState.ToSide(attackSource.GetComponent<HandRL>().handType), side);
+                //変更:左右を表示手から読み、通信とローカルで同じ要求を作る。
+                var action = new AttackAction(attackSource.Side, side);
                 if (IsLegal(action))
                 {
-                    bool sent = MatchNetworkController.Instance != null && MatchNetworkController.Instance.SendAttack(attackSource, hand);
+                    //変更:現在の対戦モードの窓口へ送る。
+                    bool sent = MatchSessionAccess.Send(action, view.Public.stateVersion, attackSource, hand);
                     AfterSend(sent);
                 }
             }
@@ -304,16 +317,8 @@ namespace Waribasi.Presentation
             {
                 return;
             }
-            var network = MatchNetworkController.Instance;
-            bool sent = false;
-            if (network != null && selectedAction is UseCardAction card)
-            {
-                sent = network.SendCard(card.CardId, card.Target, card.SwapValues, selectedVersion);
-            }
-            else if (network != null && selectedAction is RedistributeAction distribution)
-            {
-                sent = network.SendRedistribution(distribution.Left, distribution.Right);
-            }
+            //変更:選択版と操作を共通窓口へ渡し、確定は各進行側へ任せる。
+            bool sent = MatchSessionAccess.Send(selectedAction, selectedVersion);
             AfterSend(sent);
         }
 
@@ -411,7 +416,14 @@ namespace Waribasi.Presentation
             }
         }
 
+        //変更:既存オンラインの照会口は互換用に残す。
         public bool IsHandSelected(NetworkObject hand)
+        {
+            return IsMatchHandSelected(hand != null ? hand.GetComponent<MatchHandView>() : null);
+        }
+
+        //追加:選択表示も共通の席と左右を使う。
+        public bool IsMatchHandSelected(MatchHandView hand)
         {
             if (!HasSelection || hand == null || view?.Public == null)
             {
@@ -423,11 +435,45 @@ namespace Waribasi.Presentation
             }
             if (Mode == MatchSelectionMode.Card && SelectedCard != null && !SelectedCard.Definition.IsDraw && selectedAction is UseCardAction card)
             {
-                bool own = hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
+                //変更:ローカル手の所有者は明示された席で判定する。
+                bool own = hand.TryGetPlayer(out var player) && (int)player == view.LocalPlayer;
                 return own == SelectedCard.Definition.IsSelf &&
-                    (!card.Target.HasValue || card.Target == MatchClientState.ToSide(hand.GetComponent<HandRL>().handType));
+                    //変更:共通の左右で対象を照合する。
+                    (!card.Target.HasValue || card.Target == hand.Side);
             }
-            return Mode == MatchSelectionMode.Redistribution && hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
+            //変更:振り分け選択は本人の手だけに表示する。
+            return Mode == MatchSelectionMode.Redistribution && hand.TryGetPlayer(out var owner) && (int)owner == view.LocalPlayer;
         }
     }
 }
+
+//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
+//        private NetworkObject attackSource;
+//if (view == null && MatchClientState.Instance != null)
+//            {
+//                Bind(MatchClientState.Instance);
+//        public void SelectHand(NetworkObject hand)
+//        {
+//            if (!CanInteract || hand == null || !hand.IsSpawned || hand.GetComponent<HandRL>() == null)
+//            {
+//                return;
+//            }
+//            HandSide side = MatchClientState.ToSide(hand.GetComponent<HandRL>().handType);
+//            bool own = hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
+//var action = new AttackAction(MatchClientState.ToSide(attackSource.GetComponent<HandRL>().handType), side);
+//bool sent = MatchNetworkController.Instance != null && MatchNetworkController.Instance.SendAttack(attackSource, hand);
+//            var network = MatchNetworkController.Instance;
+//            bool sent = false;
+//            if (network != null && selectedAction is UseCardAction card)
+//            {
+//                sent = network.SendCard(card.CardId, card.Target, card.SwapValues, selectedVersion);
+//            }
+//            else if (network != null && selectedAction is RedistributeAction distribution)
+//            {
+//                sent = network.SendRedistribution(distribution.Left, distribution.Right);
+//            }
+//        public bool IsHandSelected(NetworkObject hand)
+//        {
+//bool own = hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
+//(!card.Target.HasValue || card.Target == MatchClientState.ToSide(hand.GetComponent<HandRL>().handType));
+//return Mode == MatchSelectionMode.Redistribution && hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;

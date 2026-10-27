@@ -235,6 +235,11 @@ namespace Waribasi.Presentation
             Highlight(timeButtons, timeIndex);
             Highlight(difficultyButtons, difficulty);
             Highlight(npcFirstButtons, npcFirst);
+            //追加:実装済みの難易度と、T07へ渡す上級の準備状況を表示する。
+            if (Page == SetupPage.Npc)
+            {
+                npcMessage.text = difficulty == (int)NpcDifficulty.Advanced ? "上級は準備中です" : "ネット接続なしで遊べます";
+            }
         }
 
         private static void Highlight(Button[] buttons, int selected)

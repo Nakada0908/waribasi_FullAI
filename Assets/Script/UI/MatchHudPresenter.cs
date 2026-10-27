@@ -86,7 +86,10 @@ namespace Waribasi.Presentation
             int me = view.LocalPlayer * 2;
             int opponent = (1 - view.LocalPlayer) * 2;
             fingersText.text = $"自分　左 {MatchText.Count(state.hands[me].count)} ・ 右 {MatchText.Count(state.hands[me + 1].count)}\n相手　左 {MatchText.Count(state.hands[opponent].count)} ・ 右 {MatchText.Count(state.hands[opponent + 1].count)}";
-            messageText.text = view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];
+            //変更:NPCの手番はネットワーク応答待ちと区別する。
+            messageText.text = MatchSessionAccess.IsLocal && state.matchPhase == (int)MatchPhase.Active &&
+                state.currentPlayer != view.LocalPlayer ? "NPCが考えています" :
+                view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];
             cardPhaseText.text = state.matchPhase == (int)MatchPhase.Active && state.currentPlayer == view.LocalPlayer
                 ? state.turnPhase == (int)TurnPhase.CardOrNormalAction ? "カード任意で1枚 → 攻撃か振り分け1回" : "カード使用済み → 攻撃か振り分け1回" : "公開履歴はいつでも確認できます";
             if (CardButtonDraw.Instance != null && view.HandIsCurrent)
@@ -155,3 +158,6 @@ namespace Waribasi.Presentation
         }
     }
 }
+
+//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
+//            messageText.text = view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];

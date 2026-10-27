@@ -102,8 +102,14 @@ namespace Waribasi.Presentation.Tests
             hand.SetActive(true);
             highlight.GetType().GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(highlight, null);
             Set(highlight, "view", view);
+            //追加:共通の手識別が既存の公開盤面を参照できることも確認する。
+            var identity = hand.GetComponent(TypeNamed("Waribasi.Presentation.MatchHandView"));
+            var identityArguments = new object[] { view, PlayerId.PlayerA };
             try
             {
+                Assert.That(identity, Is.Not.Null);
+                Assert.That(identity.GetType().GetMethod("ResolvePlayer").Invoke(identity, identityArguments), Is.True);
+                Assert.That(identityArguments[1], Is.EqualTo(PlayerId.PlayerA));
                 highlight.GetType().GetMethod("SetHighlight").Invoke(highlight, new object[] { selected });
                 Assert.That(selectionMarker.activeSelf, Is.EqualTo(selected));
                 Assert.That(sealMarker.activeSelf, Is.EqualTo(seal));
