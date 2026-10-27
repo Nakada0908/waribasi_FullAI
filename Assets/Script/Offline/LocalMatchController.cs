@@ -171,6 +171,8 @@ namespace Waribasi.Presentation
                     }
                 }
                 var camera = Instantiate(cameraPrefab);
+                //追加:NPC戦も画面比率による手の見切れを防ぐ。
+                MatchCameraViewport.Attach(camera);
                 camera.transform.SetPositionAndRotation(new Vector3(1.5f, 3, 2), Quaternion.Euler(50, 0, 0));
                 SceneManager.MoveGameObjectToScene(camera.gameObject, scene);
                 StartCoroutine(Prepare(generation));

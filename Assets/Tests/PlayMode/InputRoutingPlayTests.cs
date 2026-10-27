@@ -222,6 +222,32 @@ namespace Waribasi.Presentation.PlayTests
             Assert.That(uiClicks, Is.EqualTo(1));
         }
 
+        //追加:Sceneを開いたままのマウス押下を、次の画面へ持ち越さない。
+        [UnityTest]
+        public IEnumerator HeldMouseDoesNotClickTheNewUiWhenItsPositionIsInitialized()
+        {
+            MouseEvent(center, true);
+            yield return null;
+            var owner = owners.First(item => item.name == "RoutingTestSystem");
+            var module = owner.GetComponent<InputSystemUIInputModule>();
+            module.enabled = false;
+            UnityEngine.Object.Destroy(owner.GetComponent(RuntimeType("Waribasi.Presentation.GameInputRouter")));
+            yield return null;
+            owner.AddComponent(RuntimeType("Waribasi.Presentation.GameInputRouter"));
+            module.enabled = true;
+            yield return null;
+            yield return null;
+            MouseEvent(center, false);
+            yield return null;
+            Assert.That(uiClicks, Is.Zero);
+            MouseEvent(center, true);
+            yield return null;
+            MouseEvent(center, false);
+            yield return null;
+            Assert.That(uiClicks, Is.EqualTo(1));
+            Assert.That(board.Clicks, Is.Zero);
+        }
+
         [UnityTest]
         public IEnumerator MouseUiClickDoesNotReachTheBoardBehindIt()
         {

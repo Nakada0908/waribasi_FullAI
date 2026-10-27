@@ -20,6 +20,9 @@ namespace Waribasi.Presentation
         private int keyboardFrame = -1;
         private float lastTouch = -10;
         private bool holding;
+        //追加:新しいSceneとフォーカス復帰の入力を、押下解除と初期処理の後に受け付ける。
+        private bool pointerReady;
+        private int pointerReadyAfterFrame;
         private readonly HashSet<int> rejectedPointers = new HashSet<int>();
 
         public static bool StartPressed => Keyboard.current != null && Keyboard.current.anyKey.wasPressedThisFrame;
@@ -33,6 +36,8 @@ namespace Waribasi.Presentation
         private void Awake()
         {
             Instance = this;
+            //追加:前の画面を開いた押下を、新しい画面のクリックとして扱わない。
+            pointerReadyAfterFrame = Time.frameCount;
         }
 
         //追加:プロジェクト全体で有効なPointを、新しいSceneのUIへ再通知する。
@@ -65,7 +70,8 @@ namespace Waribasi.Presentation
             {
                 lastTouch = Time.unscaledTime;
             }
-            if (holding || rejectedPointers.Count > 0 ||
+            //変更:Scene切替直後に残った入力も重複操作として拒否する。
+            if (!pointerReady || holding || rejectedPointers.Count > 0 ||
                 (!touch && Time.unscaledTime - lastTouch < touchMouseSuppression))
             {
                 rejectedPointers.Add(data.pointerId);
@@ -101,7 +107,8 @@ namespace Waribasi.Presentation
 
         public bool ConsumeKeyboard()
         {
-            if (holding || keyboardFrame == Time.frameCount)
+            //変更:新しい画面の初期処理中は、引き継がれたSubmitも実行しない。
+            if (!pointerReady || holding || keyboardFrame == Time.frameCount)
             {
                 return false;
             }
@@ -129,11 +136,19 @@ namespace Waribasi.Presentation
             {
                 holding = false;
                 rejectedPointers.Clear();
+                //追加:少なくとも次のフレームで全ポインターが離れてから、新しい操作を受け付ける。
+                if (Time.frameCount > pointerReadyAfterFrame)
+                {
+                    pointerReady = true;
+                }
             }
         }
 
         private void OnApplicationFocus(bool focused)
         {
+            //追加:復帰時に再通知される押下を、新しい操作へ持ち越さない。
+            pointerReady = false;
+            pointerReadyAfterFrame = Time.frameCount;
             if (!focused)
             {
                 holding = false;
@@ -144,3 +159,8 @@ namespace Waribasi.Presentation
         }
     }
 }
+
+//削除:T08のScene初期入力ガードを追加する前の条件を参照用に保存する。
+//            if (holding || rejectedPointers.Count > 0 ||
+//                (!touch && Time.unscaledTime - lastTouch < touchMouseSuppression))
+//            if (holding || keyboardFrame == Time.frameCount)

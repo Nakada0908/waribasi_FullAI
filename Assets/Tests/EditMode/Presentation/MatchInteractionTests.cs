@@ -165,6 +165,8 @@ namespace Waribasi.Presentation.Tests
             try
             {
                 var router = systemOwner.AddComponent(RuntimeType("Waribasi.Presentation.GameInputRouter"));
+                //追加:初期入力待ちを終えた状態で、ジェスチャーの重複拒否を検証する。
+                router.GetType().GetField("pointerReady", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(router, true);
                 var system = systemOwner.GetComponent<EventSystem>();
                 var first = new ExtendedPointerEventData(system) { pointerId = 10, pointerType = UIPointerType.Touch };
                 var second = new ExtendedPointerEventData(system) { pointerId = 11, pointerType = UIPointerType.Touch };
