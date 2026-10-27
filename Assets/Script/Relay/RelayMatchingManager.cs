@@ -12,6 +12,8 @@ using Unity.Services.Relay.Models;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using TMPro;
+//追加:接続後に共通の対局設定を渡す。
+using Waribasi.Networking;
 
 public class RelayMatchingManager : MonoBehaviour
 {
@@ -54,10 +56,11 @@ public class RelayMatchingManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError(e);
+            //変更:例外本文に接続情報が含まれる可能性があるため種類だけ記録する。
+            Debug.LogError(e.GetType().Name);
             if (statusText != null)
             {
-                statusText.text = "初期化エラー: " + e.Message;
+                statusText.text = "初期化に失敗しました";
             }
         }
     }
@@ -79,7 +82,7 @@ public class RelayMatchingManager : MonoBehaviour
                 }
                 catch (LobbyServiceException e)
                 {
-                    Debug.LogWarning($"ハートビート送信エラー: {e}");
+                    Debug.LogWarning(e.GetType().Name);
                 }
             }
         }
@@ -115,18 +118,25 @@ public class RelayMatchingManager : MonoBehaviour
 
             //Netcodeの通信設定にRelayの情報をセットし、クライアントとして開始
             //WebGLビルドかつエディタではない場合
-#if UNITY_WEBGL && !UNITY_EDITOR
-//WebGL用(wss)
-            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(joinAllocation, "wss"));
-#else
-            //エディタやWindowsビルド用(dtls)
-            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(joinAllocation, "dtls"));
-#endif
-            NetworkManager.Singleton.StartClient();
+//変更:全経路で通信方式とUseWebSocketsを一致させる。
+            RelayTransportSetup.Client(joinAllocation);
+//削除:旧プラットフォーム分岐。
+//#if UNITY_WEBGL && !UNITY_EDITOR
+////WebGL用(wss)
+//            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(joinAllocation, "wss"));
+//#else
+//            //エディタやWindowsビルド用(dtls)
+//            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(joinAllocation, "dtls"));
+//#endif
+            //変更:開始失敗は例外復帰経路へ戻す。
+            if (!NetworkManager.Singleton.StartClient())
+            {
+                throw new InvalidOperationException("Client start failed.");
+            }
 
             if (statusText != null)
             {
-                statusText.text = "マッチング成功（クライアント）";
+                statusText.text = "接続処理中（クライアント）";
             }
 
             isConnecting = false;
@@ -143,10 +153,11 @@ public class RelayMatchingManager : MonoBehaviour
         catch (Exception e)
         {
             //通信エラーなどの予期せぬエラーは画面のテキストに直接表示する
-            Debug.LogError(e);
+            //変更:例外本文に接続情報が含まれる可能性があるため種類だけ記録する。
+            Debug.LogError(e.GetType().Name);
             if (statusText != null)
             {
-                statusText.text = "マッチングエラー: " + e.Message;
+                statusText.text = "接続に失敗しました";
             }
             isConnecting = false;
         }
@@ -177,19 +188,29 @@ public class RelayMatchingManager : MonoBehaviour
 
             //Netcodeの通信設定に自分のRelay情報をセット
             //WebGLビルドかつエディタではない場合
-#if UNITY_WEBGL && !UNITY_EDITOR
-//WebGL用(wss)
-            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(allocation, "wss"));
-#else
-            //エディタやWindowsビルド用(dtls)
-            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(allocation, "dtls"));
-#endif
+//変更:全経路で通信方式とUseWebSocketsを一致させる。
+            RelayTransportSetup.Host(allocation);
+//削除:旧プラットフォーム分岐。
+//#if UNITY_WEBGL && !UNITY_EDITOR
+////WebGL用(wss)
+//            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(allocation, "wss"));
+//#else
+//            //エディタやWindowsビルド用(dtls)
+//            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(AllocationUtils.ToRelayServerData(allocation, "dtls"));
+//#endif
 
             //接続審査ルールの設定（これがないとクライアントが接続を拒否されてしまう）
             NetworkManager.Singleton.ConnectionApprovalCallback = ApprovalCheck;
 
             //ホストとして開始
-            NetworkManager.Singleton.StartHost();
+            //変更:ランダム対戦は先手ランダム・毎手番30秒を固定する。
+            MatchNetworkController.ConfigureNextMatch(true);
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+            if (!NetworkManager.Singleton.StartHost())
+            {
+                throw new InvalidOperationException("Host start failed.");
+            }
 
             if (statusText != null)
             {
@@ -197,14 +218,14 @@ public class RelayMatchingManager : MonoBehaviour
             }
 
             //誰かが接続してきたときに呼ばれるイベントを登録
-            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
         }
         catch (Exception e)
         {
-            Debug.LogError(e);
+            //変更:例外本文に接続情報が含まれる可能性があるため種類だけ記録する。
+            Debug.LogError(e.GetType().Name);
             if (statusText != null)
             {
-                statusText.text = "部屋作成エラー: " + e.Message;
+                statusText.text = "部屋を作成できませんでした";
             }
             isConnecting = false;
         }
@@ -215,7 +236,8 @@ public class RelayMatchingManager : MonoBehaviour
     {
         response.Pending = true;
 
-        if (NetworkManager.Singleton.ConnectedClients.Count >= 2)
+        //変更:試合開始後の新規参加と途中再接続は受け付けない。
+        if (NetworkManager.Singleton.ConnectedClients.Count >= 2 || SceneManager.GetActiveScene().name != "StartGame")
         {
             response.Approved = false;
             response.Pending = false;
@@ -262,7 +284,7 @@ public class RelayMatchingManager : MonoBehaviour
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"ロビー破棄エラー: {e}");
+                Debug.LogWarning(e.GetType().Name);
             }
         }
     }

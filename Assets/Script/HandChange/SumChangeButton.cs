@@ -61,6 +61,10 @@ public class SumChangeButton : MonoBehaviour
             }
         }
 
-        pha.HandChangeServerRpc(lHand, rHand);
+        //変更:旧RPCを経由せず、本人の新しい要求へ転送する。
+        if (pha != null)
+        {
+            pha.RequestHandChange(lHand, rHand);
+        }
     }
 }

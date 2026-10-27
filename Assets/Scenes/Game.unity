@@ -1822,6 +1822,7 @@ GameObject:
   - component: {fileID: 393782259}
   - component: {fileID: 393782260}
   - component: {fileID: 393782261}
+  - component: {fileID: 393782262}
   m_Layer: 0
   m_Name: CreateHand
   m_TagString: Untagged
@@ -1953,6 +1954,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   ShowTopMostFoldoutHeaderGroup: 1
+--- !u!114 &393782262
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 393782251}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4c32870412eb40b19d0718249285d90b, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
 --- !u!1 &454698972
 GameObject:
   m_ObjectHideFlags: 0
@@ -6360,7 +6373,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1920346692}
   - component: {fileID: 1920346690}
-  - component: {fileID: 1920346691}
   m_Layer: 0
   m_Name: WinManeger
   m_TagString: Untagged
@@ -6393,19 +6405,6 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &1920346691
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1920346689}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d29ede842dc1ae8409dc05637f913f66, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  ShowTopMostFoldoutHeaderGroup: 1
 --- !u!4 &1920346692
 Transform:
   m_ObjectHideFlags: 0

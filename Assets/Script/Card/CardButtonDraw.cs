@@ -121,4 +121,37 @@ public class CardButtonDraw : MonoBehaviour
     {
         buttons[index].transform.localPosition -= new Vector3(0, 110f, 0);
     }
+
+    //追加:本人手札の変化を既存5スロットへ反映する最小互換表示。専用意匠はT04で扱う。
+    public void DrawOwnHand(System.Collections.Generic.IReadOnlyList<Waribasi.Rules.HandCard> cards)
+    {
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            bool occupied = i < cards.Count;
+            buttons[i].gameObject.SetActive(occupied);
+            if (!occupied)
+            {
+                continue;
+            }
+            var card = cards[i].Definition;
+            buttons[i].interactable = card.Kind != Waribasi.Rules.CardKind.Revival;
+            if (card.IsNumber)
+            {
+                cardButtonDraw(i, new CardCreate.Card
+                {
+                    forme = card.IsSelf, ryouhou = card.IsBoth, left = card.First, right = card.Second, hand = card.First
+                });
+            }
+            else
+            {
+                string label = card.Kind == Waribasi.Rules.CardKind.Defense ? "片手防御" :
+                    card.Kind == Waribasi.Rules.CardKind.Seal ? "攻撃封じ" :
+                    card.Kind == Waribasi.Rules.CardKind.DrawTwo ? "2枚補充" :
+                    card.Kind == Waribasi.Rules.CardKind.DrawThree ? "3枚補充" :
+                    card.Kind == Waribasi.Rules.CardKind.DrawRandom ? "1～3枚補充" : "復活（自動）";
+                buttons[i].GetComponentInChildren<TextMeshProUGUI>().text = label;
+                buttons[i].image.sprite = null;
+            }
+        }
+    }
 }

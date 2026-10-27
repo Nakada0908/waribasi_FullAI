@@ -48,7 +48,11 @@ public class CreateHand : NetworkBehaviour
     void SetPlayerID(ulong clientId)
     {
         //再接続や重複防止、既にいる場合は処理しない
-        if (playerIDs.Contains(clientId)) return;
+        //変更:2席を超える生成と重複を拒否する。
+        if (playerIDs.Contains(clientId) || playerIDs.Count >= 2)
+        {
+            return;
+        }
         //リストに追加
         playerIDs.Add(clientId);
         //リストの位置から何人目のプレイヤーかを取得
@@ -84,11 +88,12 @@ public class CreateHand : NetworkBehaviour
         l.GetComponent<HandOwner>().OwnerClientId.Value = clientId;
 
         //ホストに初めに操作権を与える
-        var localPlayer = NetworkManager.Singleton.LocalClient.PlayerObject;
-        PlayerStatus status = localPlayer.GetComponent<PlayerStatus>();
-        if (clientId == NetworkManager.ServerClientId)
-        {
-            status.myturn.Value = true;
-        }
+//削除:先手は通信進行側の確定設定から共通ルールへ渡す。
+//        var localPlayer = NetworkManager.Singleton.LocalClient.PlayerObject;
+//        PlayerStatus status = localPlayer.GetComponent<PlayerStatus>();
+//        if (clientId == NetworkManager.ServerClientId)
+//        {
+//            status.myturn.Value = true;
+//        }
     }
 }

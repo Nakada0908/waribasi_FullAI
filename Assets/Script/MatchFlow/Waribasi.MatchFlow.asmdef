@@ -1,0 +1,7 @@
+{
+    "name": "Waribasi.MatchFlow",
+    "rootNamespace": "Waribasi.MatchFlow",
+    "references": ["Waribasi.Rules"],
+    "autoReferenced": true,
+    "noEngineReferences": true
+}

@@ -1,121 +1,183 @@
-﻿using System.Collections;
+﻿//変更:正式な更新を共通ルールと認証済み通信窓口へ集約する。
 using Unity.Netcode;
-using UnityEngine;
+using Waribasi.Networking;
 
 public class CardCreate : NetworkBehaviour
 {
-    // カードの構造体
-    //System.って書いて、下のランダムと差別化する
-    [System.Serializable]//カードの構造体インスペクターで表示できるようにするため
+    [System.Serializable]
     public struct Card
     {
-        public bool forme;      // 効果対象
-        public bool ryouhou;    // 両手かどうか
-        public int left;        // 両手用 左
-        public int right;       // 両手用 右
-        public int hand;        // 片手用
-        public bool used;       // 使用済みかどうか
+        public bool forme;
+        public bool ryouhou;
+        public int left;
+        public int right;
+        public int hand;
+        public bool used;
     }
 
-    //5枚分のカードを保持
+    //変更:旧UI用の本人限定コピー。正式な手札や抽選の保存先にはしない。
     public Card[] myCards = new Card[5];
+    private MatchClientState view;
 
-    public override void OnNetworkSpawn()
+    private void Update()
     {
-        if (IsServer)
+        if (!IsOwner || view != null || MatchClientState.Instance == null)
         {
-            CreateCard();
+            return;
         }
+        view = MatchClientState.Instance;
+        view.Changed += Refresh;
+        Refresh();
     }
 
-    void CreateCard()
+    public override void OnNetworkDespawn()
     {
-        for (int i = 0; i < 5; i++)
+        if (view != null)
         {
-            Card newCard = new Card();
-
-            // 効果対象を決定
-            int taisyou = Random.Range(0, 2);
-            if (taisyou == 0)
-            {
-                newCard.forme = true;
-            }
-            else
-            {
-                newCard.forme = false;
-            }
-
-            // 両手か片手か決定
-            int ryouhoukana = Random.Range(0, 2);
-            if (ryouhoukana == 0)
-            {
-                newCard.ryouhou = true;
-
-                newCard.right = Random.Range(1, 5);
-                //左<=右になるようにする
-                newCard.left = Random.Range(1, newCard.right + 1);
-            }
-            else
-            {
-                newCard.ryouhou = false;
-
-                newCard.hand = Random.Range(1, 5);
-            }
-
-            //サーバー側に保存
-            myCards[i] = newCard;
-
-            //クライアントへ送信
-            SendCardClientRpc(
-                i,
-                newCard.forme,
-                newCard.ryouhou,
-                newCard.left,
-                newCard.right,
-                newCard.hand
-            );
+            view.Changed -= Refresh;
         }
+        base.OnNetworkDespawn();
     }
 
-    [ClientRpc]
-    void SendCardClientRpc(int index, bool f, bool r, int l, int rt, int h)
+    private void Refresh()
     {
-        //毎回サーバーに確認しなくてもいいようにクライアント用のコピーを作る
-        Card copyCard = new Card();
-
-        copyCard.forme = f;
-        copyCard.ryouhou = r;
-        copyCard.left = l;
-        copyCard.right = rt;
-        copyCard.hand = h;
-
-        //手札配列に保存（これで各プレイヤーのオブジェクトに手札が保存）
-        myCards[index] = copyCard;
-
-        //IsOwnerを使うことで、このオブジェクトが自分のキャラクターの時だけUIを表示
-        //これで相手の手札が自分の画面に表示されるのを防ぐ
-        if (IsOwner)
+        if (!IsOwner || !view.HandIsCurrent || CardButtonDraw.Instance == null)
         {
-            //ボタン表示処理
-            //CardButtonDraw.Instance.cardButtonDraw(index, myCards[index]);
-            StartCoroutine(WaitAndDrawUI(index));
+            return;
         }
-    }
-
-    // UIの準備を待ってから描画（Draw）だけを行うコルーチン
-    private IEnumerator WaitAndDrawUI(int index)
-    {
-        //UIマネージャー (CardButtonDraw.Instance) がシーンに出現するまで待機
-        while (CardButtonDraw.Instance == null)
+        myCards = new Card[5];
+        for (int i = 0; i < view.OwnHand.Count; i++)
         {
-            yield return null; // 1フレーム待機して様子を見る
+            var card = view.OwnHand[i].Definition;
+            myCards[i] = new Card
+            {
+                forme = card.IsSelf, ryouhou = card.IsBoth,
+                left = card.First, right = card.Second, hand = card.First
+            };
         }
-
-        //Updateを使わなくても好きな秒数だけ待機できる
-        //さらに念のため待っておいて完全にUIの準備ができるようにする
-        yield return new WaitForSeconds(0.1f);
-
-        //準備ができたら、すでに保存してある myCards のデータを使って描画！
-        CardButtonDraw.Instance.cardButtonDraw(index, myCards[index]);
+        CardButtonDraw.Instance.DrawOwnHand(view.OwnHand);
     }
 }
+
+//削除:旧実装は参照用に保存し、RPC登録・直接更新・旧配布を実行しない。
+//using System.Collections;
+//using Unity.Netcode;
+//using UnityEngine;
+//
+//public class CardCreate : NetworkBehaviour
+//{
+//    // カードの構造体
+//    //System.って書いて、下のランダムと差別化する
+//    [System.Serializable]//カードの構造体インスペクターで表示できるようにするため
+//    public struct Card
+//    {
+//        public bool forme;      // 効果対象
+//        public bool ryouhou;    // 両手かどうか
+//        public int left;        // 両手用 左
+//        public int right;       // 両手用 右
+//        public int hand;        // 片手用
+//        public bool used;       // 使用済みかどうか
+//    }
+//
+//    //5枚分のカードを保持
+//    public Card[] myCards = new Card[5];
+//
+//    public override void OnNetworkSpawn()
+//    {
+//        if (IsServer)
+//        {
+//            CreateCard();
+//        }
+//    }
+//
+//    void CreateCard()
+//    {
+//        for (int i = 0; i < 5; i++)
+//        {
+//            Card newCard = new Card();
+//
+//            // 効果対象を決定
+//            int taisyou = Random.Range(0, 2);
+//            if (taisyou == 0)
+//            {
+//                newCard.forme = true;
+//            }
+//            else
+//            {
+//                newCard.forme = false;
+//            }
+//
+//            // 両手か片手か決定
+//            int ryouhoukana = Random.Range(0, 2);
+//            if (ryouhoukana == 0)
+//            {
+//                newCard.ryouhou = true;
+//
+//                newCard.right = Random.Range(1, 5);
+//                //左<=右になるようにする
+//                newCard.left = Random.Range(1, newCard.right + 1);
+//            }
+//            else
+//            {
+//                newCard.ryouhou = false;
+//
+//                newCard.hand = Random.Range(1, 5);
+//            }
+//
+//            //サーバー側に保存
+//            myCards[i] = newCard;
+//
+//            //クライアントへ送信
+//            SendCardClientRpc(
+//                i,
+//                newCard.forme,
+//                newCard.ryouhou,
+//                newCard.left,
+//                newCard.right,
+//                newCard.hand
+//            );
+//        }
+//    }
+//
+//    [ClientRpc]
+//    void SendCardClientRpc(int index, bool f, bool r, int l, int rt, int h)
+//    {
+//        //毎回サーバーに確認しなくてもいいようにクライアント用のコピーを作る
+//        Card copyCard = new Card();
+//
+//        copyCard.forme = f;
+//        copyCard.ryouhou = r;
+//        copyCard.left = l;
+//        copyCard.right = rt;
+//        copyCard.hand = h;
+//
+//        //手札配列に保存（これで各プレイヤーのオブジェクトに手札が保存）
+//        myCards[index] = copyCard;
+//
+//        //IsOwnerを使うことで、このオブジェクトが自分のキャラクターの時だけUIを表示
+//        //これで相手の手札が自分の画面に表示されるのを防ぐ
+//        if (IsOwner)
+//        {
+//            //ボタン表示処理
+//            //CardButtonDraw.Instance.cardButtonDraw(index, myCards[index]);
+//            StartCoroutine(WaitAndDrawUI(index));
+//        }
+//    }
+//
+//    // UIの準備を待ってから描画（Draw）だけを行うコルーチン
+//    private IEnumerator WaitAndDrawUI(int index)
+//    {
+//        //UIマネージャー (CardButtonDraw.Instance) がシーンに出現するまで待機
+//        while (CardButtonDraw.Instance == null)
+//        {
+//            yield return null; // 1フレーム待機して様子を見る
+//        }
+//
+//        //Updateを使わなくても好きな秒数だけ待機できる
+//        //さらに念のため待っておいて完全にUIの準備ができるようにする
+//        yield return new WaitForSeconds(0.1f);
+//
+//        //準備ができたら、すでに保存してある myCards のデータを使って描画！
+//        CardButtonDraw.Instance.cardButtonDraw(index, myCards[index]);
+//    }
+//}
