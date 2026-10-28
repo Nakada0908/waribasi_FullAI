@@ -63,6 +63,11 @@ namespace Waribasi.Rules
             }
 
             var hands = state.GetHands(actor);
+            //追加:任意のパスを認めず、最後の生存手が封印された場合に限る。
+            if (action is SkipAction)
+            {
+                return RequiresSkip(actor) ? ActionRejection.None : ActionRejection.SkipNotAllowed;
+            }
             if (action is AttackAction attack)
             {
                 if (!GameState.IsValidSide(attack.Source) || !GameState.IsValidSide(attack.Target))
@@ -89,6 +94,11 @@ namespace Waribasi.Rules
 
             if (action is RedistributeAction distribution)
             {
+                //追加:封印手を含む本人の配置変更は全体を禁止する。
+                if (HasSealedHand(actor))
+                {
+                    return ActionRejection.OwnHandSealed;
+                }
                 if (distribution.Left < 0 || distribution.Left > 4 ||
                     distribution.Right < 0 || distribution.Right > 4)
                 {
@@ -100,12 +110,37 @@ namespace Waribasi.Rules
                     return ActionRejection.TotalNotPreserved;
                 }
 
+                //追加:片手を移すだけの交換は禁止し、両手を生かす分配は残す。
+                if ((hands.Left == 0 || hands.Right == 0) &&
+                    distribution.Left == hands.Right && distribution.Right == hands.Left)
+                {
+                    return ActionRejection.SingleHandSwap;
+                }
+
                 return distribution.Left == hands.Left && distribution.Right == hands.Right
                     ? ActionRejection.DistributionUnchanged
                     : ActionRejection.None;
             }
 
             return ActionRejection.InvalidAction;
+        }
+
+        //追加:カード判断前後・通信・表示で共通のスキップ条件を問い合わせる。
+        public bool RequiresSkip(PlayerId actor)
+        {
+            if (!GameState.IsValidPlayer(actor) || state.MatchPhase != MatchPhase.Active || actor != state.CurrentPlayer)
+            {
+                return false;
+            }
+            var hands = state.GetHands(actor);
+            return (hands.Left == 0 && hands.Right > 0 && state.GetEffects(actor).Right.IsSealed) ||
+                (hands.Right == 0 && hands.Left > 0 && state.GetEffects(actor).Left.IsSealed);
+        }
+
+        private bool HasSealedHand(PlayerId actor)
+        {
+            var effects = state.GetEffects(actor);
+            return effects.Left.IsSealed || effects.Right.IsSealed;
         }
 
         public IReadOnlyList<GameAction> GetLegalActions(PlayerId actor)
@@ -134,6 +169,8 @@ namespace Waribasi.Rules
 
             //候補生成は検証だけを行い、抽選や手札を消費しない。
             AddCardCandidates(actions, actor);
+            //追加:NPCのカードなし・カード後の仮想手番も同じ行動で終了できる。
+            AddIfLegal(actions, actor, new SkipAction());
             return actions.AsReadOnly();
         }
 
@@ -185,6 +222,12 @@ namespace Waribasi.Rules
             if (card.IsBoth ? hands.Left == 0 || hands.Right == 0 : hands.GetCount(action.Target.Value) == 0)
             {
                 return ActionRejection.TargetHandEliminated;
+            }
+
+            //追加:本人の自己対象札だけを制限し、相手対象札と補充には適用しない。
+            if (card.IsSelf && (card.IsBoth ? HasSealedHand(actor) : state.GetEffects(actor).Get(action.Target.Value).IsSealed))
+            {
+                return ActionRejection.OwnHandSealed;
             }
 
             if (card.IsNumber)

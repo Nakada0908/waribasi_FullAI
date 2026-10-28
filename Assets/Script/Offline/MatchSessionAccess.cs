@@ -30,6 +30,11 @@ namespace Waribasi.Presentation
             {
                 return network.SendCard(card.CardId, card.Target, card.SwapValues, version);
             }
+            //追加:条件付きスキップをオンラインの正式要求へ渡す。
+            if (action is SkipAction)
+            {
+                return network.SendSkip(version);
+            }
             return action is RedistributeAction distribution && network.SendRedistribution(distribution.Left, distribution.Right);
         }
 

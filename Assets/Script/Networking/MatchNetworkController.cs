@@ -377,7 +377,10 @@ namespace Waribasi.Networking
                         BeginMovement(player, request, now);
                     }
                     Publish();
-                    if (authority.Gate != InputGate.Presenting)
+                    //変更:スキップ前のカード表示では、変更済みの指もすぐ同期する。
+                    //削除:if (authority.Gate != InputGate.Presenting)
+                    if (authority.Gate != InputGate.Presenting ||
+                        (response.Accepted && !response.Replayed && request.Operation == MatchOperation.UseCard))
                     {
                         ApplyHandPoses();
                     }
@@ -541,6 +544,17 @@ namespace Waribasi.Networking
             }
             RequestActionRpc(view.CreateRequest(MatchOperation.UseCard, target: target.HasValue ? (int)target.Value : -1,
                 cardId: cardId, swapValues: swapValues));
+            return true;
+        }
+
+        //追加:スキップにも現在の版・要求ID・本人確認の既存RPCを使う。
+        public bool SendSkip(long selectedVersion)
+        {
+            if (!view.CanAct || view.Public.stateVersion != selectedVersion)
+            {
+                return false;
+            }
+            RequestActionRpc(view.CreateRequest(MatchOperation.Skip));
             return true;
         }
 

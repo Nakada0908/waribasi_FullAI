@@ -1,4 +1,6 @@
 using System.Text;
+//追加:共通ルールのスキップ候補から判断待ちを表示する。
+using System.Linq;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
@@ -97,6 +99,17 @@ namespace Waribasi.Presentation
                 view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];
             cardPhaseText.text = state.matchPhase == (int)MatchPhase.Active && state.currentPlayer == view.LocalPlayer
                 ? state.turnPhase == (int)TurnPhase.CardOrNormalAction ? "カード任意で1枚 → 攻撃か振り分け1回" : "カード使用済み → 攻撃か振り分け1回" : "公開履歴はいつでも確認できます";
+            //追加:カード結果の表示区間とスキップ表示を、NPC思考や通常説明より優先する。
+            string presentation = MatchText.Presentation(state, view.LocalPlayer);
+            if (presentation != null)
+            {
+                messageText.text = presentation;
+            }
+            else if (view.CanAct && interaction.LegalActions.Any(action => action is SkipAction))
+            {
+                messageText.text = "片手が封印中です。カードを使うか「カードを使わない」を選択";
+                cardPhaseText.text = "カード判断後、通常行動をスキップします";
+            }
             if (CardButtonDraw.Instance != null && view.HandIsCurrent)
             {
                 CardButtonDraw.Instance.DrawOwnHand(view.OwnHand);

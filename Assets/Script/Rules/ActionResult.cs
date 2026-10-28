@@ -26,7 +26,11 @@ namespace Waribasi.Rules
         AutomaticCardOnly,
         InvalidCardTarget,
         CardUnchanged,
-        SourceHandSealed
+        SourceHandSealed,
+        //追加:v1.1の封印・片手交換・条件付きスキップの拒否理由。
+        OwnHandSealed,
+        SingleHandSwap,
+        SkipNotAllowed
     }
 
     public enum RuleEventType
@@ -44,7 +48,9 @@ namespace Waribasi.Rules
         CardUsed,
         EffectApplied,
         EffectRemoved,
-        ChangeBlocked
+        ChangeBlocked,
+        //追加:カード成立とは別の通常行動として公開する。
+        TurnSkipped
     }
 
     public sealed class RuleEvent

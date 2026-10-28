@@ -31,6 +31,9 @@ namespace Waribasi.Presentation
         [SerializeField] private Button attackCancelButton;
         [SerializeField] private Button redistributeButton;
         [SerializeField] private Button swapButton;
+        //追加:スキップ条件中は交換できないため、既存ボタンを判断用に切り替える。
+        private TMP_Text swapText;
+        private string swapLabel;
         private MatchClientState view;
         private RuleActionQuery query;
         private IReadOnlyList<GameAction> legalActions = Array.Empty<GameAction>();
@@ -69,7 +72,11 @@ namespace Waribasi.Presentation
             cancelButton.onClick.AddListener(CancelSelection);
             attackCancelButton.onClick.AddListener(CancelSelection);
             redistributeButton.onClick.AddListener(OpenRedistribution);
-            swapButton.onClick.AddListener(SelectSwap);
+            //変更:Sceneを変更せず、封印で詰まったときだけカード辞退操作にする。
+            //削除:swapButton.onClick.AddListener(SelectSwap);
+            swapText = swapButton.GetComponentInChildren<TMP_Text>(true);
+            swapLabel = swapText != null ? swapText.text : "左右交換";
+            swapButton.onClick.AddListener(SelectSwapOrSkip);
             RefreshControls();
         }
 
@@ -282,6 +289,18 @@ namespace Waribasi.Presentation
             ChooseAction(swap);
         }
 
+        //追加:カードを使わない判断も、共有の合法性照会と送信経路へ通す。
+        public void SelectSwapOrSkip()
+        {
+            var skip = new SkipAction();
+            if (IsLegal(skip))
+            {
+                AfterSend(MatchSessionAccess.Send(skip, view.Public.stateVersion));
+                return;
+            }
+            SelectSwap();
+        }
+
         public void SelectOption(int index)
         {
             if (CanInteract && index >= 0 && index < options.Count)
@@ -408,7 +427,14 @@ namespace Waribasi.Presentation
             if (view?.Public != null)
             {
                 int offset = view.LocalPlayer * 2;
-                swapButton.interactable = IsLegal(new RedistributeAction(view.Public.hands[offset + 1].count, view.Public.hands[offset].count));
+                //変更:片手封印中に札を使う判断を残し、辞退時だけ手番を終える。
+                //削除:swapButton.interactable = IsLegal(new RedistributeAction(view.Public.hands[offset + 1].count, view.Public.hands[offset].count));
+                bool canSkip = legalActions.Any(action => action is SkipAction);
+                swapButton.interactable = CanInteract && (canSkip || IsLegal(new RedistributeAction(view.Public.hands[offset + 1].count, view.Public.hands[offset].count)));
+                if (swapText != null)
+                {
+                    swapText.text = canSkip ? "カードを使わない" : swapLabel;
+                }
             }
             else
             {

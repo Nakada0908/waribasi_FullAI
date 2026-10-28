@@ -144,21 +144,27 @@ namespace Waribasi.Rules.Tests
         }
 
         [Test]
-        public void DefenseAllowsOwnNumberAndSealAndDoesNotRefreshExistingExpiry()
+        //変更:防御単独は自己変更を妨げず、封印併用は自己変更を拒否する。
+        public void DefenseAllowsOwnNumberButSealBlocksItWithoutRefreshingExpiry()
         {
             var effects = new PlayerEffects(new HandEffects(2, 1), default);
             var engine = Position(new[] { new CardDefinition(CardKind.SelfSingle, 4) }, aEffects: effects);
-            Assert.That(Use(engine, 1, HandSide.Left).Accepted, Is.True);
+            //変更:封印された左は拒否し、非封印の右を変更できる。
+            Assert.That(Use(engine, 1, HandSide.Left).Rejection, Is.EqualTo(ActionRejection.OwnHandSealed));
+            Assert.That(Use(engine, 1, HandSide.Right).Accepted, Is.True);
             Assert.That(engine.Snapshot.PlayerAEffects, Is.EqualTo(effects));
             Assert.That(engine.TryApply(A, new AttackAction(HandSide.Left, HandSide.Left), 1).Rejection,
                 Is.EqualTo(ActionRejection.SourceHandSealed));
-            Assert.That(engine.TryApply(A, new RedistributeAction(2, 3), 1).Accepted, Is.True);
+            //変更:配置変更で封印を外せない。非封印手の攻撃で手番を終える。
+            Assert.That(engine.TryApply(A, new RedistributeAction(2, 3), 1).Rejection, Is.EqualTo(ActionRejection.OwnHandSealed));
+            Assert.That(Apply(engine, A, new AttackAction(HandSide.Right, HandSide.Right)).Accepted, Is.True);
             Assert.That(engine.Snapshot.PlayerAEffects.Left.DefenseUntilTurn, Is.EqualTo(2));
             Assert.That(engine.Snapshot.PlayerAEffects.Left.IsSealed, Is.False);
         }
 
         [Test]
-        public void SealOnDefendedLastHandAllowsCardsAndRedistributionAndExpiresAtTurnEnd()
+        //変更:最後の封印手は自己カードと配置変更を拒否し、スキップで期限解除する。
+        public void SealOnDefendedLastHandBlocksOwnCardAndExpiresOnSkip()
         {
             var engine = RuleEngine.FromPosition(new PlayerHands(1, 1), new PlayerHands(0, 4), A,
                 playerACards: new[] { new CardDefinition(CardKind.Seal) },
@@ -169,8 +175,10 @@ namespace Waribasi.Rules.Tests
             Apply(engine, A, new RedistributeAction(0, 2));
             Assert.That(engine.Validate(B, new AttackAction(HandSide.Right, HandSide.Right), engine.Snapshot.StateVersion),
                 Is.EqualTo(ActionRejection.SourceHandSealed));
-            Assert.That(engine.TryApply(B, new UseCardAction(1, HandSide.Right), engine.Snapshot.StateVersion).Accepted, Is.True);
-            var result = Apply(engine, B, new RedistributeAction(1, 2));
+            //変更:カードと配置を消費せず拒否してからスキップする。
+            Assert.That(engine.TryApply(B, new UseCardAction(1, HandSide.Right), engine.Snapshot.StateVersion).Rejection, Is.EqualTo(ActionRejection.OwnHandSealed));
+            Assert.That(Apply(engine, B, new RedistributeAction(1, 3)).Rejection, Is.EqualTo(ActionRejection.OwnHandSealed));
+            var result = Apply(engine, B, new SkipAction());
             Assert.That(result.State.PlayerBEffects.Right.IsSealed, Is.False);
             Assert.That(result.State.PlayerBEffects.Right.IsDefended, Is.False);
             Assert.That(result.Events.Count(e => e.Type == RuleEventType.EffectRemoved), Is.EqualTo(2));
@@ -199,7 +207,9 @@ namespace Waribasi.Rules.Tests
         [Test]
         public void SwapKeepsEffectsOnSidesAndMergeClearsBothEffectsOnlyOnEliminatedSide()
         {
-            var effects = new PlayerEffects(new HandEffects(2, 2), new HandEffects(2));
+            //変更:合法な左右交換の効果固定は防御だけで検証する。封印は変更自体を拒否する。
+            //削除:var effects = new PlayerEffects(new HandEffects(2, 2), new HandEffects(2));
+            var effects = new PlayerEffects(new HandEffects(2), new HandEffects(2));
             var engine = RuleEngine.FromPosition(new PlayerHands(1, 3), new PlayerHands(1, 1), A,
                 playerAEffects: effects);
             var swap = Apply(engine, A, new RedistributeAction(3, 1));
@@ -255,7 +265,8 @@ namespace Waribasi.Rules.Tests
 
         [TestCase(HandSide.Left)]
         [TestCase(HandSide.Right)]
-        public void NewlyDrawnRevivalClearsSealBeforeRevivingLastHandAndThenPassesTurn(HandSide side)
+        //変更:封印はスキップで解除し、その後の攻撃で新しく引いた復活札が発動する。
+        public void NewlyDrawnRevivalRemainsAvailableAfterSealedTurnSkip(HandSide side)
         {
             var aHands = side == HandSide.Left ? new PlayerHands(4, 0) : new PlayerHands(0, 4);
             var aEffects = side == HandSide.Left ? new PlayerEffects(new HandEffects(0, 1), default) :
@@ -264,13 +275,16 @@ namespace Waribasi.Rules.Tests
                 playerACards: new[] { new CardDefinition(CardKind.DrawTwo) }, playerAEffects: aEffects,
                 random: Sequence(97, 50));
             Use(engine, 1);
-            Apply(engine, A, new RedistributeAction(aHands.Right, aHands.Left));
-            var last = side == HandSide.Left ? HandSide.Right : HandSide.Left;
+            //変更:片手交換を使わずスキップで手番を終える。脱落時の封印解除は別テストでも確認する。
+            //削除:Apply(engine, A, new RedistributeAction(aHands.Right, aHands.Left));
+            Apply(engine, A, new SkipAction());
+            var last = side;
             var result = Apply(engine, B, new AttackAction(HandSide.Left, last));
             Assert.That(result.State.MatchPhase, Is.EqualTo(MatchPhase.Active));
             Assert.That(result.State.CurrentPlayer, Is.EqualTo(A));
             Assert.That(result.State.GetHands(A).GetCount(last), Is.EqualTo(1));
-            Assert.That(result.State.GetHands(A).GetCount(side), Is.Zero);
+            //変更:反対側の脱落手はそのまま維持する。
+            Assert.That(result.State.GetHands(A).GetCount(side == HandSide.Left ? HandSide.Right : HandSide.Left), Is.Zero);
             Assert.That(result.State.GetEffects(A).Get(last), Is.EqualTo(default(HandEffects)));
             Assert.That(result.State.CardHistory.Last().Automatic, Is.True);
             Assert.That(result.Events.Any(e => e.Type == RuleEventType.MatchEnded), Is.False);
@@ -519,7 +533,9 @@ namespace Waribasi.Rules.Tests
             var engine = Position(new[] { new CardDefinition(CardKind.Seal), new CardDefinition(CardKind.Seal) });
             Use(engine, 1, HandSide.Left);
             Apply(engine, A, new RedistributeAction(0, 2));
-            Apply(engine, B, new RedistributeAction(0, 2));
+            //変更:封印された本人は配置変更できず、非封印手から攻撃する。
+            //削除:Apply(engine, B, new RedistributeAction(0, 2));
+            Apply(engine, B, new AttackAction(HandSide.Right, HandSide.Right));
             Assert.That(engine.Snapshot.PlayerBEffects.Left.IsSealed, Is.False);
             Assert.That(Use(engine, 2, HandSide.Right).Accepted, Is.True);
             Assert.That(engine.Snapshot.PlayerBEffects.Right.SealUntilTurn, Is.EqualTo(4));

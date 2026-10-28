@@ -210,6 +210,17 @@ namespace Waribasi.Rules
                     TurnPhase.NormalActionOnly, state.TurnNumber, events);
             }
 
+            //追加:スキップは勝敗・自動復活を判定せず、効果期限と手番だけを更新する。
+            if (action is SkipAction)
+            {
+                events.Add(new RuleEvent(RuleEventType.TurnSkipped, actor));
+                ExpireEffects(work, events);
+                var nextPlayer = GameState.GetOpponent(actor);
+                events.Add(new RuleEvent(RuleEventType.TurnChanged, nextPlayer));
+                return Commit(work, nextPlayer, MatchPhase.Active, TurnPhase.CardOrNormalAction,
+                    state.TurnNumber + 1, events);
+            }
+
             PlayerId changedPlayer;
             PlayerHands changedHands;
             if (action is AttackAction attack)

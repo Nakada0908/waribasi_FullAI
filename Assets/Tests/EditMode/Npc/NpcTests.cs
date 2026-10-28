@@ -87,7 +87,9 @@ namespace Waribasi.Npc.Tests
             var observation = Observe(new PlayerHands(1, 0), new PlayerHands(4, 4),
                 new[] { new CardDefinition(CardKind.Revival) });
             var candidates = NpcCandidateGenerator.Generate(observation, 1);
-            var vulnerable = candidates.First(candidate => candidate.Normal is RedistributeAction);
+            //変更:総数1の片手交換は禁止のため、防御先への攻撃で同じ危険局面を作る。
+            //削除:var vulnerable = candidates.First(candidate => candidate.Normal is RedistributeAction);
+            var vulnerable = candidates.First(candidate => candidate.Normal is AttackAction);
             var score = IntermediateNpc.Evaluate(observation, vulnerable);
             Assert.That(score.FatalReplies, Is.Zero);
             Assert.That(score.RevivalCost, Is.EqualTo(1));

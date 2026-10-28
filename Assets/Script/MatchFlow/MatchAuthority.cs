@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+//追加:本人の合法札の有無を正式状態で判断する。
+using System.Linq;
 using Waribasi.Rules;
 
 namespace Waribasi.MatchFlow
@@ -20,6 +22,8 @@ namespace Waribasi.MatchFlow
         private readonly double[] rateStart = new double[2];
         private readonly int[] rateCount = new int[2];
         private double lastTime;
+        //追加:カード結果を公開する区間と、後続の自動スキップ表示を分ける。
+        private bool skipAfterPresentation;
 
         public Guid MatchId { get; }
         public int TurnSeconds { get; }
@@ -91,16 +95,32 @@ namespace Waribasi.MatchFlow
         public bool Tick(double now)
         {
             CheckTime(now);
+            //追加:判断する札も通常行動もない待機には時間切れを付けない。
+            if (Gate == InputGate.Accepting && MustAutoSkip())
+            {
+                return ApplyAutomaticSkip(now);
+            }
             if (Gate == InputGate.Accepting && Deadline.HasValue && now >= Deadline.Value)
             {
                 return Commit(rules.TryEnd(State.CurrentPlayer, MatchEndReason.Timeout, State.StateVersion));
             }
             if (Gate == InputGate.Presenting && now >= PresentationUntil)
             {
+                //追加:前のカード結果を表示し終えてから専用のスキップ通知を発行する。
+                if (skipAfterPresentation)
+                {
+                    skipAfterPresentation = false;
+                    return ApplyAutomaticSkip(now);
+                }
                 Gate = InputGate.Accepting;
                 SetDeadline(now);
                 LastResult = null;
                 DeliverySequence++;
+                //追加:次の手番の判断が不要なら、時計を消費せずスキップを確定する。
+                if (MustAutoSkip())
+                {
+                    return ApplyAutomaticSkip(now);
+                }
                 return true;
             }
             return false;
@@ -174,12 +194,19 @@ namespace Waribasi.MatchFlow
                     ? rules.TryEnd(authenticatedPlayer, MatchEndReason.Surrender, request.ExpectedVersion)
                     : rules.TryApply(authenticatedPlayer, action, request.ExpectedVersion);
                 Commit(result);
-                if (result.Accepted && (request.Operation == MatchOperation.Attack || request.Operation == MatchOperation.Redistribute) &&
+                //変更:スキップも通常行動の表示待ちへ通す。
+                //削除:攻撃・振り分けだけを表示待ちにしていた条件。
+                //if (result.Accepted && (request.Operation == MatchOperation.Attack || request.Operation == MatchOperation.Redistribute) &&
+                if (result.Accepted && (action is AttackAction || action is RedistributeAction || action is SkipAction) &&
                     State.MatchPhase == MatchPhase.Active)
                 {
-                    Gate = InputGate.Presenting;
-                    Deadline = null;
-                    PresentationUntil = now + PresentationSeconds;
+                    BeginPresentation(now);
+                }
+                //追加:カード成立は先に公開し、その表示中に操作時計を進めない。
+                else if (result.Accepted && action is UseCardAction && MustAutoSkip())
+                {
+                    skipAfterPresentation = true;
+                    BeginPresentation(now);
                 }
                 response = new MatchResponse(request.RequestId, result.Accepted,
                     result.Accepted ? RequestRejection.None : RequestRejection.RuleRejected,
@@ -195,6 +222,33 @@ namespace Waribasi.MatchFlow
             return response;
         }
 
+        //追加:本人に使用可能な任意札があれば、辞退か使用の判断を待つ。
+        private bool MustAutoSkip()
+        {
+            var actions = rules.GetLegalActions(State.CurrentPlayer);
+            return actions.Any(action => action is SkipAction) && !actions.Any(action => action is UseCardAction);
+        }
+
+        //追加:ホストの自動進行も同じルール・確定通知を使う。
+        private bool ApplyAutomaticSkip(double now)
+        {
+            var result = rules.TryApply(State.CurrentPlayer, new SkipAction(), State.StateVersion);
+            if (!Commit(result))
+            {
+                return false;
+            }
+            BeginPresentation(now);
+            return true;
+        }
+
+        //追加:操作判断の時計と、確定済み結果を見せる待機を分離する。
+        private void BeginPresentation(double now)
+        {
+            Gate = InputGate.Presenting;
+            Deadline = null;
+            PresentationUntil = now + PresentationSeconds;
+        }
+
         private bool Commit(ActionResult result)
         {
             if (!result.Accepted)
@@ -207,6 +261,8 @@ namespace Waribasi.MatchFlow
             {
                 Gate = InputGate.Ended;
                 Deadline = null;
+                //追加:降参・切断後に保留中のスキップを実行しない。
+                skipAfterPresentation = false;
             }
             return true;
         }

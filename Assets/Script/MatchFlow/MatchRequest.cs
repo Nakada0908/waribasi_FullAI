@@ -8,7 +8,9 @@ namespace Waribasi.MatchFlow
         Attack,
         Redistribute,
         UseCard,
-        Surrender
+        Surrender,
+        //追加:既存の操作番号を維持してスキップを追加する。
+        Skip
     }
 
     public enum InputGate
@@ -96,6 +98,14 @@ namespace Waribasi.MatchFlow
                     return true;
                 case MatchOperation.Surrender:
                     return Source == -1 && Target == -1 && Left == 0 && Right == 0 && CardId == 0 && !SwapValues;
+                //追加:スキップに余分な対象・札・配置を混在させない。
+                case MatchOperation.Skip:
+                    if (Source != -1 || Target != -1 || Left != 0 || Right != 0 || CardId != 0 || SwapValues)
+                    {
+                        return false;
+                    }
+                    action = new SkipAction();
+                    return true;
                 default:
                     return false;
             }

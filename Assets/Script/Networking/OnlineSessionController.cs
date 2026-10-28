@@ -13,7 +13,9 @@ namespace Waribasi.Networking
 {
     public sealed partial class OnlineSessionController : MonoBehaviour
     {
-        public const string Protocol = "waribasi-session-v1";
+        //変更:封印・スキップの異なる旧版と接続・ランダム検索を混在させない。
+        //削除:public const string Protocol = "waribasi-session-v1";
+        public const string Protocol = "waribasi-session-v2";
         private const string Channel = "waribasi/session/v1";
         private const float SettingsDisplaySeconds = 0.75f;
         private const int MaximumMessageBytes = 4096;

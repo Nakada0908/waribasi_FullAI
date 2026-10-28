@@ -87,6 +87,11 @@ namespace Waribasi.MatchFlow
                     target: card.Target.HasValue ? (int)card.Target.Value : -1,
                     cardId: card.CardId, swapValues: card.SwapValues);
             }
+            //追加:人間とNPCのスキップも版・要求IDを伴う正式要求へ通す。
+            if (action is SkipAction)
+            {
+                return new MatchRequest(Authority.MatchId, id, version, MatchOperation.Skip);
+            }
             throw new ArgumentException("A supported action is required.", nameof(action));
         }
     }

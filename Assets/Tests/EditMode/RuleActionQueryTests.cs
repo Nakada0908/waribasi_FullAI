@@ -108,8 +108,10 @@ namespace Waribasi.Rules.Tests
             var actions = Query(engine, PlayerId.PlayerA).GetLegalActions(PlayerId.PlayerA);
             Assert.That(actions.OfType<AttackAction>().Any(a => a.Source == HandSide.Left), Is.False);
             Assert.That(actions.OfType<AttackAction>().Any(a => a.Target == HandSide.Left), Is.True);
-            Assert.That(actions.OfType<UseCardAction>().Any(a => a.Target == HandSide.Left), Is.True);
-            Assert.That(actions.OfType<RedistributeAction>().Any(a => a.Left == 3 && a.Right == 1), Is.True);
+            //変更:封印した本人の札対象・すべての配置変更を拒否する。
+            Assert.That(actions.OfType<UseCardAction>().Any(a => a.Target == HandSide.Left), Is.False);
+            Assert.That(actions.OfType<UseCardAction>().Any(a => a.Target == HandSide.Right), Is.True);
+            Assert.That(actions.OfType<RedistributeAction>(), Is.Empty);
         }
     }
 }

@@ -45,6 +45,11 @@ namespace Waribasi.Npc
 
         public static string ActionKey(GameAction action)
         {
+            //追加:探索でカード後のスキップを未選択と区別する。
+            if (action is SkipAction)
+            {
+                return "S";
+            }
             if (action is AttackAction attack)
             {
                 return $"A{attack.Source}:{attack.Target}";

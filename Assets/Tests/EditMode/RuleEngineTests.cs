@@ -81,7 +81,8 @@ namespace Waribasi.Rules.Tests
         [TestCase(0, 4, 2, 2)]
         [TestCase(4, 0, 2, 2)]
         [TestCase(1, 3, 3, 1)]
-        [TestCase(0, 4, 4, 0)]
+        //変更:片手だけの交換はv1.1で禁止する。専用テストで拒否を確認する。
+        //削除:[TestCase(0, 4, 4, 0)]
         public void RedistributionSupportsMergeRevivalAndSwapAndEndsTheTurn(
             int left, int right, int nextLeft, int nextRight)
         {
@@ -186,15 +187,21 @@ namespace Waribasi.Rules.Tests
         public void RedistributionReportsEliminationAndRevivalForTheActualSides()
         {
             var engine = Position(0, 4, 1, 1);
-            var result = engine.TryApply(PlayerId.PlayerA, new RedistributeAction(4, 0), 0);
+            //変更:合法な復活分配と合体を別の局面で確認する。
+            //削除:var result = engine.TryApply(PlayerId.PlayerA, new RedistributeAction(4, 0), 0);
+            var result = engine.TryApply(PlayerId.PlayerA, new RedistributeAction(2, 2), 0);
             var revived = result.Events.Single(e => e.Type == RuleEventType.HandRevived);
-            var eliminated = result.Events.Single(e => e.Type == RuleEventType.HandEliminated);
+            //変更:片手の移動ではなく両手生存からの合体で脱落する。
+            var merged = Position(2, 2, 1, 1).TryApply(PlayerId.PlayerA, new RedistributeAction(4, 0), 0);
+            var eliminated = merged.Events.Single(e => e.Type == RuleEventType.HandEliminated);
 
             Assert.That(revived.Hand, Is.EqualTo(HandSide.Left));
             Assert.That(revived.PreviousCount, Is.EqualTo(0));
-            Assert.That(revived.Count, Is.EqualTo(4));
+            //変更:復活分配後の本数。
+            Assert.That(revived.Count, Is.EqualTo(2));
             Assert.That(eliminated.Hand, Is.EqualTo(HandSide.Right));
-            Assert.That(eliminated.PreviousCount, Is.EqualTo(4));
+            //変更:合体前の本数。
+            Assert.That(eliminated.PreviousCount, Is.EqualTo(2));
             Assert.That(eliminated.Count, Is.EqualTo(0));
         }
 

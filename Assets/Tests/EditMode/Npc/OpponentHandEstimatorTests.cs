@@ -91,7 +91,11 @@ namespace Waribasi.Npc.Tests
                 Assert.That(engine.TryApply(PlayerId.PlayerB, use, engine.Snapshot.StateVersion).Accepted, Is.True);
                 var normal = engine.GetLegalActions(PlayerId.PlayerB).OfType<RedistributeAction>().First(action => action.Left > 0 && action.Right > 0);
                 engine.TryApply(PlayerId.PlayerB, normal, engine.Snapshot.StateVersion);
-                var response = engine.GetLegalActions(PlayerId.PlayerA).OfType<RedistributeAction>().First();
+                //変更:封印中も合法な応答を選び、次の札を検証できる両手生存局面を保つ。
+                //削除:var response = engine.GetLegalActions(PlayerId.PlayerA).OfType<RedistributeAction>().First();
+                var response = engine.GetLegalActions(PlayerId.PlayerA).First(action => !(action is UseCardAction) &&
+                    engine.Fork().TryApply(PlayerId.PlayerA, action, engine.Snapshot.StateVersion).State.PlayerB.Left > 0 &&
+                    engine.Fork().TryApply(PlayerId.PlayerA, action, engine.Snapshot.StateVersion).State.PlayerB.Right > 0);
                 engine.TryApply(PlayerId.PlayerA, response, engine.Snapshot.StateVersion);
             }
             var estimator = new OpponentHandEstimator();

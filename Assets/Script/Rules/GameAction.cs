@@ -4,6 +4,11 @@ namespace Waribasi.Rules
     {
     }
 
+    //追加:片手封印で通常行動がない場合だけ使う専用行動。
+    public sealed class SkipAction : GameAction
+    {
+    }
+
     //追加:内容は所持札から解決し、要求には札IDと対象・割り当てだけを載せる。
     public sealed class UseCardAction : GameAction
     {
