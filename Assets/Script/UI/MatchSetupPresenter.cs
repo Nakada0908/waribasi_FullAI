@@ -40,6 +40,14 @@ namespace Waribasi.Presentation
         private int npcFirst;
         private int lastStart;
         private bool cancelPending;
+        //追加:解放前の行の範囲を保持し、実行中の解放でも同じ4ボタン配置へ揃える。
+        private float difficultyStart;
+        private float difficultyEnd;
+        private float difficultyY;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        //追加:通常リリースでは開発用UIの参照も作らない。
+        private Button developmentUnlockButton;
+#endif
         public SetupPage Page { get; private set; }
         public bool SettingsVisible => Page == SetupPage.Waiting && isActiveAndEnabled && pages[(int)SetupPage.Waiting].activeInHierarchy;
         public MatchSetup SelectedOnlineSetup => new MatchSetup(MatchMode.Room, (FirstTurnSetting)first, MatchSetup.TimeOptions[timeIndex]);
@@ -51,10 +59,23 @@ namespace Waribasi.Presentation
             session.Changed += Refresh;
             //追加:既存の難易度ボタンを複製し、4Sceneや素材を増やさず最強を追加する。
             AddStrongestOption();
+            //追加:EditorとDevelopment BuildのNPC設定だけに強制解放操作を追加する。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            AddDevelopmentUnlockOption();
+#endif
             BindOptions(firstButtons, value => first = value);
             BindOptions(timeButtons, value => timeIndex = value);
             BindOptions(difficultyButtons, value => difficulty = value);
             BindOptions(npcFirstButtons, value => npcFirst = value);
+            //変更:前回設定の復元を独立させ、解放済みの神も従来の値で復元する。
+            RestoreNpcSetup();
+            SetPage(NpcMatchEntry.ReturnToPreparation ? SetupPage.Npc : SetupPage.Mode);
+            NpcMatchEntry.ReturnToPreparation = false;
+        }
+
+        //追加:未解放時だけ上級へ戻し、解放済みなら難易度と先後手を保持する。
+        private void RestoreNpcSetup()
+        {
             if (NpcMatchEntry.LastSetup != null)
             {
                 //変更:保存領域を消した後に前回の最強選択を復元しない。
@@ -62,8 +83,6 @@ namespace Waribasi.Presentation
                     ? (int)NpcDifficulty.Advanced : (int)NpcMatchEntry.LastSetup.Difficulty;
                 npcFirst = (int)NpcMatchEntry.LastSetup.First;
             }
-            SetPage(NpcMatchEntry.ReturnToPreparation ? SetupPage.Npc : SetupPage.Mode);
-            NpcMatchEntry.ReturnToPreparation = false;
         }
 
         //追加:ロック中は既存3ボタンの配置を維持し、解放後だけ同じ行へ4つ並べる。
@@ -72,24 +91,64 @@ namespace Waribasi.Presentation
             var original = difficultyButtons;
             var strongest = Instantiate(original[2], original[2].transform.parent);
             strongest.name = "Difficulty3";
-            strongest.GetComponentInChildren<TMP_Text>(true).text = "最強";
+            //変更:HUDと同じ名称を使い、内部のStrongest値を維持する。
+            //削除:strongest.GetComponentInChildren<TMP_Text>(true).text = "最強";
+            strongest.GetComponentInChildren<TMP_Text>(true).text = NpcMatchEntry.DifficultyLabel(NpcDifficulty.Strongest);
             difficultyButtons = new[] { original[0], original[1], original[2], strongest };
-            strongest.gameObject.SetActive(NpcMatchEntry.IsStrongestUnlocked);
+            //変更:再配置前の範囲を一度だけ取得し、実行中の解放に共用する。
+            var left = (RectTransform)original[0].transform;
+            var right = (RectTransform)original[2].transform;
+            difficultyStart = left.anchoredPosition.x - left.rect.width / 2;
+            difficultyEnd = right.anchoredPosition.x + right.rect.width / 2;
+            difficultyY = left.anchoredPosition.y;
+            RefreshStrongestOption();
+        }
+
+        //追加:保存済み解放と開発用解放の両方で、神の表示と配置を反映する。
+        private void RefreshStrongestOption()
+        {
+            difficultyButtons[(int)NpcDifficulty.Strongest].gameObject.SetActive(NpcMatchEntry.IsStrongestUnlocked);
             if (NpcMatchEntry.IsStrongestUnlocked)
             {
-                var left = (RectTransform)original[0].transform;
-                var right = (RectTransform)original[2].transform;
-                float start = left.anchoredPosition.x - left.rect.width / 2;
-                float end = right.anchoredPosition.x + right.rect.width / 2;
-                float cell = (end - start) / 4;
+                //変更:元の3ボタンの範囲を使い、繰り返し更新で幅を縮めない。
+                float cell = (difficultyEnd - difficultyStart) / 4;
                 for (int index = 0; index < difficultyButtons.Length; index++)
                 {
                     var rect = (RectTransform)difficultyButtons[index].transform;
                     rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, cell - 10);
-                    rect.anchoredPosition = new Vector2(start + cell * (index + 0.5f), left.anchoredPosition.y);
+                    rect.anchoredPosition = new Vector2(difficultyStart + cell * (index + 0.5f), difficultyY);
                 }
             }
         }
+
+        //追加:既存の入力対応ボタンを使い、設定画面の戻るボタンの右へ配置する。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void AddDevelopmentUnlockOption()
+        {
+            developmentUnlockButton = Instantiate(difficultyButtons[0], difficultyButtons[0].transform.parent);
+            developmentUnlockButton.name = "DevelopmentUnlockStrongest";
+            developmentUnlockButton.onClick = new Button.ButtonClickedEvent();
+            developmentUnlockButton.onClick.AddListener(UnlockStrongestForDevelopment);
+            developmentUnlockButton.GetComponentInChildren<TMP_Text>(true).text = "開発用：神を解放";
+            var rect = (RectTransform)developmentUnlockButton.transform;
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, 400);
+            rect.anchoredPosition = new Vector2(400, -280);
+        }
+
+        private void UnlockStrongestForDevelopment()
+        {
+            var local = LocalMatchController.Instance;
+            if (Page != SetupPage.Npc || session == null || session.IsWorking || session.HasSession ||
+                (local != null && (local.Active || local.IsWorking)) || NpcMatchEntry.Progress == null)
+            {
+                return;
+            }
+            NpcMatchEntry.Progress.UnlockForDevelopment();
+            difficulty = (int)NpcDifficulty.Strongest;
+            RefreshStrongestOption();
+            Refresh();
+        }
+#endif
 
         private void BindOptions(Button[] buttons, Action<int> select)
         {
@@ -266,6 +325,16 @@ namespace Waribasi.Presentation
             Highlight(timeButtons, timeIndex);
             Highlight(difficultyButtons, difficulty);
             Highlight(npcFirstButtons, npcFirst);
+            //追加:解放後は開発用操作を隠し、通常の難易度選択へ戻す。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (developmentUnlockButton != null)
+            {
+                developmentUnlockButton.gameObject.SetActive(!NpcMatchEntry.IsStrongestUnlocked);
+                var local = LocalMatchController.Instance;
+                developmentUnlockButton.interactable = !session.IsWorking && !session.HasSession &&
+                    (local == null || (!local.Active && !local.IsWorking));
+            }
+#endif
             //追加:実装済みの難易度と、T07へ渡す上級の準備状況を表示する。
             //変更:通常3難易度のオフライン開始を表示する。
             if (Page == SetupPage.Npc)

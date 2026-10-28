@@ -70,7 +70,9 @@ namespace Waribasi.MatchFlow
                 case NpcDifficulty.Beginner: return "初級";
                 case NpcDifficulty.Intermediate: return "中級";
                 case NpcDifficulty.Advanced: return "上級";
-                case NpcDifficulty.Strongest: return "最強";
+                //変更:既存の選択値を維持し、画面上の名称だけ神へ揃える。
+                //削除:case NpcDifficulty.Strongest: return "最強";
+                case NpcDifficulty.Strongest: return "神";
                 default: throw new ArgumentOutOfRangeException(nameof(difficulty));
             }
         }
