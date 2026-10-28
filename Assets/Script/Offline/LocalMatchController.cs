@@ -172,8 +172,11 @@ namespace Waribasi.Presentation
                     {
                         var hand = Instantiate(side == 0 ? leftHandPrefab : rightHandPrefab);
                         SceneManager.MoveGameObjectToScene(hand, scene);
-                        hand.transform.position = new Vector3(3 * Mathf.Abs(side - player), 0, player * 10);
-                        hand.transform.rotation = Quaternion.Euler(0, player * 180, 0);
+                        //変更:オンラインと同じ席・左右の配置と回転を使う。
+                        MatchHandLayout.Place(hand.transform, (PlayerId)player, (HandSide)side);
+                        //削除:配置と回転の二重実装を保存する。
+                        //hand.transform.position = new Vector3(3 * Mathf.Abs(side - player), 0, player * 10);
+                        //hand.transform.rotation = Quaternion.Euler(0, player * 180, 0);
                         var identity = hand.GetComponent<MatchHandView>();
                         identity.BindLocal((PlayerId)player, (HandSide)side);
                         hands.Add(identity);
@@ -499,7 +502,12 @@ namespace Waribasi.Presentation
             hands.Clear();
             if (destination == "Quit")
             {
+                //追加:Web版の終了もオンラインと揃え、破棄済みの対戦画面に残さない。
+#if UNITY_WEBGL && !UNITY_EDITOR
+                SceneManager.LoadSceneAsync("Title");
+#else
                 Application.Quit();
+#endif
             }
             else
             {

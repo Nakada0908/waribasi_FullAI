@@ -90,27 +90,33 @@ public class CreateHand : NetworkBehaviour
 
     void CreatePlayerHand(ulong clientId, int playerIndex)
     {
-        int handIndexR = 1;
-        int handIndexL = 0; 
+        //変更:配置の計算はNPCと共通の処理へ集約する。
+        //削除:旧配置計算を参照用に保存する。
+        //int handIndexR = 1;
+        //int handIndexL = 0;
 
-        float Rx = 3f * Mathf.Abs(handIndexR - playerIndex);
+        //float Rx = 3f * Mathf.Abs(handIndexR - playerIndex);
 
         //右手の生成
         NetworkObject r = Instantiate(RHandPrefab);
-        r.transform.position = new Vector3(Rx, 0, playerIndex * 10);
-        r.transform.rotation = new Quaternion(0, 180 * playerIndex, 0, 0);
+        //r.transform.position = new Vector3(Rx, 0, playerIndex * 10);
+        //r.transform.rotation = new Quaternion(0, 180 * playerIndex, 0, 0);
+        //変更:単位Quaternionを生成する共通配置を使い、ゼロや非正規化の回転を渡さない。
+        Waribasi.Presentation.MatchHandLayout.Place(r.transform, (Waribasi.Rules.PlayerId)playerIndex, Waribasi.Rules.HandSide.Right);
         //clientIdの物（各プレイヤーのもの）
         //変更:対戦画面の手をSceneと同時に破棄し、再戦で二重生成しない。
         r.SpawnWithOwnership(clientId, true);
         //削除:Sceneをまたいで残る既定の生成。
         //r.SpawnWithOwnership(clientId);
 
-        float Lx = 3f * Mathf.Abs(handIndexL - playerIndex);
+        //float Lx = 3f * Mathf.Abs(handIndexL - playerIndex);
 
         //左手の生成
         NetworkObject l = Instantiate(LHandPrefab);
-        l.transform.position = new Vector3(Lx, 0, playerIndex * 10);
-        l.transform.rotation = new Quaternion(0, 180 * playerIndex, 0, 0);
+        //l.transform.position = new Vector3(Lx, 0, playerIndex * 10);
+        //l.transform.rotation = new Quaternion(0, 180 * playerIndex, 0, 0);
+        //変更:左右とも同じ席に対応する配置・回転を使う。
+        Waribasi.Presentation.MatchHandLayout.Place(l.transform, (Waribasi.Rules.PlayerId)playerIndex, Waribasi.Rules.HandSide.Left);
         //変更:対戦画面の手をSceneと同時に破棄し、再戦で二重生成しない。
         l.SpawnWithOwnership(clientId, true);
         //削除:Sceneをまたいで残る既定の生成。

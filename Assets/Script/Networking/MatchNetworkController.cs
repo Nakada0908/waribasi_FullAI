@@ -581,7 +581,11 @@ namespace Waribasi.Networking
                 return;
             }
             float progress = (float)((now - movementStarted) / MatchAuthority.PresentationSeconds);
-            if (progress >= 1 || authority.Gate == InputGate.Ended)
+            //変更:盤面勝利を確定しても決着の攻撃は最後まで演出し、降参・切断では停止する。
+            //削除:決着した攻撃も即座に打ち切っていた条件。
+            //if (progress >= 1 || authority.Gate == InputGate.Ended)
+            if (progress >= 1 || (authority.Gate == InputGate.Ended &&
+                authority.State.EndReason != MatchEndReason.HandsEliminated))
             {
                 movingHand.transform.position = moveOrigin;
                 movingHand = null;

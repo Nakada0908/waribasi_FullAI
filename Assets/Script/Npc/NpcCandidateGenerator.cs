@@ -32,7 +32,10 @@ namespace Waribasi.Npc
             }
             foreach (var card in engine.GetLegalActions(player).OfType<UseCardAction>())
             {
-                if (!budget.Spend(true))
+                //変更:同期列挙も同じ経路を使い、分割探索のときだけ予算を消費する。
+                //削除:同期列挙では予算を渡さない。
+                //if (!budget.Spend(true))
+                if (budget != null && !budget.Spend(true))
                 {
                     yield break;
                 }
@@ -55,14 +58,23 @@ namespace Waribasi.Npc
         {
             foreach (var normal in engine.GetLegalActions(player).Where(action => !(action is UseCardAction)))
             {
-                if (!budget.Spend(true))
+                //変更:同期・分割探索の適用条件を共通化する。
+                //削除:同期列挙では予算を渡さない。
+                //if (!budget.Spend(true))
+                if (budget != null && !budget.Spend(true))
                 {
                     yield break;
                 }
                 var position = engine.Fork();
                 if (position.TryApply(player, normal, position.Snapshot.StateVersion).Accepted)
                 {
-                    budget.Statistics.Candidates++;
+                    //変更:分割探索の統計だけを更新する。
+                    //削除:同期列挙では統計を保持しない。
+                    //budget.Statistics.Candidates++;
+                    if (budget != null)
+                    {
+                        budget.Statistics.Candidates++;
+                    }
                     yield return new NpcCandidate(card, normal, position);
                 }
             }
@@ -71,29 +83,33 @@ namespace Waribasi.Npc
         public static IReadOnlyList<NpcCandidate> Generate(PlayerObservation observation, ulong simulationSeed)
         {
             var engine = NpcSimulation.Create(observation, simulationSeed);
-            var candidates = new List<NpcCandidate>();
-            AddNormal(engine, observation.Player, null, candidates);
-            foreach (var card in engine.GetLegalActions(observation.Player).OfType<UseCardAction>())
-            {
-                var position = engine.Fork();
-                if (position.TryApply(observation.Player, card, position.Snapshot.StateVersion).Accepted)
-                {
-                    AddNormal(position, observation.Player, card, candidates);
-                }
-            }
-            return candidates.AsReadOnly();
+            //変更:中級と上級・最強で、カード＋通常行動の生成処理を共有する。
+            return EnumerateSimulation(engine, observation.Player, null)
+                .Where(candidate => candidate != null).ToList().AsReadOnly();
         }
 
-        private static void AddNormal(RuleEngine engine, PlayerId player, UseCardAction card, List<NpcCandidate> candidates)
-        {
-            foreach (var normal in engine.GetLegalActions(player).Where(action => !(action is UseCardAction)))
-            {
-                var position = engine.Fork();
-                if (position.TryApply(player, normal, position.Snapshot.StateVersion).Accepted)
-                {
-                    candidates.Add(new NpcCandidate(card, normal, position));
-                }
-            }
-        }
+        //削除:同期列挙専用だった処理は参照用に保存する。
+        //var candidates = new List<NpcCandidate>();
+        //AddNormal(engine, observation.Player, null, candidates);
+        //foreach (var card in engine.GetLegalActions(observation.Player).OfType<UseCardAction>())
+        //{
+        //    var position = engine.Fork();
+        //    if (position.TryApply(observation.Player, card, position.Snapshot.StateVersion).Accepted)
+        //    {
+        //        AddNormal(position, observation.Player, card, candidates);
+        //    }
+        //}
+        //return candidates.AsReadOnly();
+        //private static void AddNormal(RuleEngine engine, PlayerId player, UseCardAction card, List<NpcCandidate> candidates)
+        //{
+        //    foreach (var normal in engine.GetLegalActions(player).Where(action => !(action is UseCardAction)))
+        //    {
+        //        var position = engine.Fork();
+        //        if (position.TryApply(player, normal, position.Snapshot.StateVersion).Accepted)
+        //        {
+        //            candidates.Add(new NpcCandidate(card, normal, position));
+        //        }
+        //    }
+        //}
     }
 }
