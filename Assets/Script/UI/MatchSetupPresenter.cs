@@ -49,17 +49,46 @@ namespace Waribasi.Presentation
             Instance = this;
             session = OnlineSessionController.Ensure();
             session.Changed += Refresh;
+            //追加:既存の難易度ボタンを複製し、4Sceneや素材を増やさず最強を追加する。
+            AddStrongestOption();
             BindOptions(firstButtons, value => first = value);
             BindOptions(timeButtons, value => timeIndex = value);
             BindOptions(difficultyButtons, value => difficulty = value);
             BindOptions(npcFirstButtons, value => npcFirst = value);
             if (NpcMatchEntry.LastSetup != null)
             {
-                difficulty = (int)NpcMatchEntry.LastSetup.Difficulty;
+                //変更:保存領域を消した後に前回の最強選択を復元しない。
+                difficulty = NpcMatchEntry.LastSetup.Difficulty == NpcDifficulty.Strongest && !NpcMatchEntry.IsStrongestUnlocked
+                    ? (int)NpcDifficulty.Advanced : (int)NpcMatchEntry.LastSetup.Difficulty;
                 npcFirst = (int)NpcMatchEntry.LastSetup.First;
             }
             SetPage(NpcMatchEntry.ReturnToPreparation ? SetupPage.Npc : SetupPage.Mode);
             NpcMatchEntry.ReturnToPreparation = false;
+        }
+
+        //追加:ロック中は既存3ボタンの配置を維持し、解放後だけ同じ行へ4つ並べる。
+        private void AddStrongestOption()
+        {
+            var original = difficultyButtons;
+            var strongest = Instantiate(original[2], original[2].transform.parent);
+            strongest.name = "Difficulty3";
+            strongest.GetComponentInChildren<TMP_Text>(true).text = "最強";
+            difficultyButtons = new[] { original[0], original[1], original[2], strongest };
+            strongest.gameObject.SetActive(NpcMatchEntry.IsStrongestUnlocked);
+            if (NpcMatchEntry.IsStrongestUnlocked)
+            {
+                var left = (RectTransform)original[0].transform;
+                var right = (RectTransform)original[2].transform;
+                float start = left.anchoredPosition.x - left.rect.width / 2;
+                float end = right.anchoredPosition.x + right.rect.width / 2;
+                float cell = (end - start) / 4;
+                for (int index = 0; index < difficultyButtons.Length; index++)
+                {
+                    var rect = (RectTransform)difficultyButtons[index].transform;
+                    rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, cell - 10);
+                    rect.anchoredPosition = new Vector2(start + cell * (index + 0.5f), left.anchoredPosition.y);
+                }
+            }
         }
 
         private void BindOptions(Button[] buttons, Action<int> select)
@@ -161,6 +190,8 @@ namespace Waribasi.Presentation
             var result = NpcMatchEntry.TryStart(new NpcMatchSetup((NpcDifficulty)difficulty, (NpcFirstPlayerChoice)npcFirst));
             npcMessage.text = result == NpcStartResult.Accepted ? "対戦を準備しています" :
                 result == NpcStartResult.UnsupportedDifficulty ? "この難易度は準備中です" :
+                //追加:ロック中の開始拒否を表示する。
+                result == NpcStartResult.Locked ? "上級に勝利すると解放されます" :
                 result == NpcStartResult.Busy ? "対戦を準備しています" : "NPC対戦は準備中です";
         }
 

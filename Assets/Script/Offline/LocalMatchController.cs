@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+//追加:最強へ現在札の定義だけをコピーする。
+using System.Linq;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -62,6 +64,8 @@ namespace Waribasi.Presentation
             }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            //追加:このゲーム専用キーを読み、再起動後も解放を維持する。
+            NpcMatchEntry.ConfigureProgress(new NpcUnlockProgress(new PlayerPrefsNpcUnlockStore()));
             NpcMatchEntry.Register(StartNpc);
             SceneManager.sceneLoaded += OnSceneLoaded;
             //追加:外部のScene遷移でも古い探索を停止する。
@@ -91,6 +95,11 @@ namespace Waribasi.Presentation
 
         private NpcStartResult StartNpc(NpcMatchSetup setup)
         {
+            //追加:登録済み入口を迂回した呼び出しも拒否する。
+            if (setup.Difficulty == NpcDifficulty.Strongest && !NpcMatchEntry.IsStrongestUnlocked)
+            {
+                return NpcStartResult.Locked;
+            }
             var online = OnlineSessionController.Instance;
             if (Active || IsWorking || (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening) ||
                 (online != null && (online.IsWorking || online.HasSession)))
@@ -292,14 +301,27 @@ namespace Waribasi.Presentation
                 LastCandidateCount = decision.CandidateCount;
             }
             //追加:上級は観測だけを渡し、各処理片の前に現在の試合・版・手番を検証する。
-            else if (Session.Setup.Difficulty == NpcDifficulty.Advanced)
+            //変更:最強も同じ予算と停止条件で探索し、情報の入口だけを分ける。
+            else if (Session.Setup.Difficulty == NpcDifficulty.Advanced || Session.Setup.Difficulty == NpcDifficulty.Strongest)
             {
                 var options = new NpcSearchOptions
                 {
                     MaxMilliseconds = Math.Max(1, Math.Min(600, (turnThinkStarted + 1 - Now) * 1000)),
                     MaxApplications = Math.Max(1, 40000 - turnApplications)
                 };
-                advancedThinking = new AdvancedNpc(observation, choices, options, recentBoards, handEstimator);
+                //追加:相手観測は最強の分岐だけで読み、札の定義以外を探索へ渡さない。
+                if (Session.Setup.Difficulty == NpcDifficulty.Strongest)
+                {
+                    var strongestOptions = StrongestNpc.CreateOptions();
+                    strongestOptions.MaxMilliseconds = options.MaxMilliseconds;
+                    strongestOptions.MaxApplications = options.MaxApplications;
+                    var currentCards = authority.GetObservation(Session.Human).OwnHand.Select(card => card.Definition).ToArray();
+                    advancedThinking = StrongestNpc.CreateSearch(observation, currentCards, choices, strongestOptions, recentBoards);
+                }
+                else
+                {
+                    advancedThinking = new AdvancedNpc(observation, choices, options, recentBoards, handEstimator);
+                }
                 while (!advancedThinking.IsComplete)
                 {
                     if (!CanThink(epoch, match, observation.PublicState.StateVersion))
@@ -326,7 +348,8 @@ namespace Waribasi.Presentation
             //変更:上級のCPU時間とフレーム待ち込みの時間を区別する。
             //削除:同期思考のみの計測。
             //LastThinkMilliseconds = timer.Elapsed.TotalMilliseconds;
-            if (Session.Setup.Difficulty != NpcDifficulty.Advanced)
+            //変更:最強の分割探索もCPU時間の計測値を維持する。
+            if (Session.Setup.Difficulty != NpcDifficulty.Advanced && Session.Setup.Difficulty != NpcDifficulty.Strongest)
             {
                 LastThinkMilliseconds = timer.Elapsed.TotalMilliseconds;
             }

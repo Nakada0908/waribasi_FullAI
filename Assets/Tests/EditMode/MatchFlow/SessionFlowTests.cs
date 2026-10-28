@@ -165,10 +165,16 @@ namespace Waribasi.MatchFlow.Tests
         public void NpcEntryValidatesSettingsAndHasNoOnlineFallback()
         {
             Assert.That(NpcMatchEntry.TryStart(null), Is.EqualTo(NpcStartResult.InvalidSettings));
-            Assert.Throws<ArgumentException>(() => new NpcMatchSetup((NpcDifficulty)3, NpcFirstPlayerChoice.Random));
+            //変更:最強を含めた4値の外を検証する。
+            Assert.Throws<ArgumentException>(() => new NpcMatchSetup((NpcDifficulty)4, NpcFirstPlayerChoice.Random));
             Assert.Throws<ArgumentException>(() => new NpcMatchSetup(NpcDifficulty.Beginner, (NpcFirstPlayerChoice)3));
             foreach (NpcDifficulty difficulty in Enum.GetValues(typeof(NpcDifficulty)))
             {
+                //追加:解放条件の検証は専用テストへ分ける。
+                if (difficulty == NpcDifficulty.Strongest)
+                {
+                    continue;
+                }
                 foreach (NpcFirstPlayerChoice first in Enum.GetValues(typeof(NpcFirstPlayerChoice)))
                 {
                     var setup = new NpcMatchSetup(difficulty, first);

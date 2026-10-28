@@ -6,14 +6,23 @@ namespace Waribasi.MatchFlow
     public sealed class LocalMatchSession
     {
         private readonly ulong[] requests = new ulong[2];
+        //追加:結果と保存は正式なローカル対局の経路で結び付ける。
+        private readonly NpcUnlockProgress progress;
         public NpcMatchSetup Setup { get; }
         public MatchAuthority Authority { get; private set; }
         public PlayerId Human => PlayerId.PlayerA;
         public PlayerId Npc => PlayerId.PlayerB;
 
-        public LocalMatchSession(NpcMatchSetup setup, PlayerId randomFirst)
+        //変更:隔離した保存先も注入できる。既存呼び出しは登録済みの保存を使う。
+        public LocalMatchSession(NpcMatchSetup setup, PlayerId randomFirst, NpcUnlockProgress progress = null)
         {
             Setup = setup ?? throw new ArgumentNullException(nameof(setup));
+            //追加:直接構築も未解放の最強を受け付けない。
+            this.progress = progress ?? NpcMatchEntry.Progress;
+            if (setup.Difficulty == NpcDifficulty.Strongest && this.progress?.IsStrongestUnlocked != true)
+            {
+                throw new InvalidOperationException("Strongest NPC is locked.");
+            }
             //変更:上級も共通のローカル進行で開始する。
             //削除:上級未実装時の構築拒否を保存する。
             //if (setup.Difficulty == NpcDifficulty.Advanced)
@@ -37,7 +46,13 @@ namespace Waribasi.MatchFlow
 
         public MatchResponse Submit(PlayerId actor, GameAction action, long version, double now)
         {
-            return Authority.Submit(actor, Request(actor, action, version, false), now);
+            //変更:受理した行動で正式な盤面勝利が確定した後にだけ保存する。
+            var response = Authority.Submit(actor, Request(actor, action, version, false), now);
+            if (response.Accepted)
+            {
+                progress?.RecordResult(Setup.Difficulty, Authority.State, Human);
+            }
+            return response;
         }
 
         public MatchResponse Surrender(long version, double now)

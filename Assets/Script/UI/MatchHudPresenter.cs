@@ -82,6 +82,11 @@ namespace Waribasi.Presentation
                 ? "通信中断" : state.matchPhase == (int)MatchPhase.Finished ? (state.winner == view.LocalPlayer ? "勝利" : "敗北") :
                 state.matchPhase == (int)MatchPhase.Preparing ? "対戦準備中" : state.gate == (int)InputGate.Presenting ? "行動を反映中" :
                 state.currentPlayer == view.LocalPlayer ? "自分の手番" : "相手の手番");
+            //追加:最強のゲーム画面には難易度名だけを示す。
+            if (MatchSessionAccess.IsLocal)
+            {
+                turnText.text = NpcMatchEntry.DifficultyLabel(MatchSessionAccess.Local.Session.Setup.Difficulty) + " ／ " + turnText.text;
+            }
             cardCountsText.text = $"自分の手札 { (view.LocalPlayer == 0 ? state.playerACardCount : state.playerBCardCount)}枚 ／ 相手 { (view.LocalPlayer == 0 ? state.playerBCardCount : state.playerACardCount)}枚";
             int me = view.LocalPlayer * 2;
             int opponent = (1 - view.LocalPlayer) * 2;

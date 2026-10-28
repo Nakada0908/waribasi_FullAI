@@ -6,7 +6,9 @@ namespace Waribasi.MatchFlow
     {
         Beginner,
         Intermediate,
-        Advanced
+        Advanced,
+        //追加:解放式の追加難易度。既存3難易度の値は維持する。
+        Strongest
     }
 
     public enum NpcFirstPlayerChoice
@@ -22,7 +24,9 @@ namespace Waribasi.MatchFlow
         NotConnected,
         UnsupportedDifficulty,
         InvalidSettings,
-        Busy
+        Busy,
+        //追加:未解放の直接開始も拒否する。
+        Locked
     }
 
     public sealed class NpcMatchSetup
@@ -34,7 +38,7 @@ namespace Waribasi.MatchFlow
 
         public NpcMatchSetup(NpcDifficulty difficulty, NpcFirstPlayerChoice first)
         {
-            if (difficulty < NpcDifficulty.Beginner || difficulty > NpcDifficulty.Advanced ||
+            if (difficulty < NpcDifficulty.Beginner || difficulty > NpcDifficulty.Strongest ||
                 first < NpcFirstPlayerChoice.Random || first > NpcFirstPlayerChoice.Npc)
             {
                 throw new ArgumentException("Invalid NPC settings.");
@@ -50,6 +54,26 @@ namespace Waribasi.MatchFlow
         private static bool starting;
         public static NpcMatchSetup LastSetup { get; private set; }
         public static bool ReturnToPreparation { get; set; }
+        //追加:保存実装はUnity側から接続し、通常の入口と直接構築に同じ解放状態を使う。
+        public static NpcUnlockProgress Progress { get; private set; }
+        public static bool IsStrongestUnlocked => Progress?.IsStrongestUnlocked == true;
+
+        public static void ConfigureProgress(NpcUnlockProgress progress)
+        {
+            Progress = progress ?? throw new ArgumentNullException(nameof(progress));
+        }
+
+        public static string DifficultyLabel(NpcDifficulty difficulty)
+        {
+            switch (difficulty)
+            {
+                case NpcDifficulty.Beginner: return "初級";
+                case NpcDifficulty.Intermediate: return "中級";
+                case NpcDifficulty.Advanced: return "上級";
+                case NpcDifficulty.Strongest: return "最強";
+                default: throw new ArgumentOutOfRangeException(nameof(difficulty));
+            }
+        }
 
         public static void Register(Func<NpcMatchSetup, NpcStartResult> start)
         {
@@ -73,6 +97,11 @@ namespace Waribasi.MatchFlow
             if (starting)
             {
                 return NpcStartResult.Busy;
+            }
+            //追加:UIを経由しない開始要求も解放を確認する。
+            if (setup.Difficulty == NpcDifficulty.Strongest && !IsStrongestUnlocked)
+            {
+                return NpcStartResult.Locked;
             }
             LastSetup = setup;
             if (handler == null)
