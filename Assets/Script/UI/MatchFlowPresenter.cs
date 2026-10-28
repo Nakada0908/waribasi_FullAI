@@ -24,11 +24,23 @@ namespace Waribasi.Presentation
         [SerializeField] private TMP_Text rematchStatus;
         [SerializeField] private Button rematchButton;
         [SerializeField] private TMP_Text rematchLabel;
+        //追加:開始前と終了時の読める最低時間を別々に設定する。
+        [Header("T16 Text Display")]
+        [SerializeField, Min(0)] private float minimumPreparationDisplaySeconds = 2.5f;
+        [SerializeField, Min(0)] private float minimumResultDisplaySeconds = 2.5f;
+        [SerializeField] private TMP_Text resultText;
+        private readonly ReadableDisplayTiming preparationTiming = new ReadableDisplayTiming();
+        private readonly ReadableDisplayTiming resultTiming = new ReadableDisplayTiming();
+        private bool transitionObscured;
+        private bool applicationPaused;
+        private bool applicationFocused = true;
+        private string resultShownMatch;
         private OnlineSessionController session;
         private MatchClientState view;
         private long shownVersion = -1;
         private string shownMatch;
-        private float shownAt;
+        //削除:状態受信時点を表示開始として数えていた時刻。
+        //private float shownAt;
         private string confirmation;
         private bool surrenderPending;
         public bool ModalOpen => menuPanel != null && menuPanel.activeSelf;
@@ -70,7 +82,8 @@ namespace Waribasi.Presentation
                 {
                     shownVersion = state.stateVersion;
                     shownMatch = state.matchId;
-                    shownAt = Time.unscaledTime;
+                    //変更:時刻はCanvasの描画段階で、表示できる文字を確認してから記録する。
+                    //削除:shownAt = Time.unscaledTime;
                     Refresh();
                 }
             }
@@ -87,6 +100,116 @@ namespace Waribasi.Presentation
                     CloseMenu();
                 }
             }
+        }
+
+        //追加:描画される段階を表示起点にし、非表示・破棄中は計測を残さない。
+        private void OnEnable()
+        {
+            Canvas.willRenderCanvases += ObserveReadableDisplay;
+        }
+
+        private void OnDisable()
+        {
+            Canvas.willRenderCanvases -= ObserveReadableDisplay;
+            preparationTiming.Invalidate();
+            resultTiming.Invalidate();
+        }
+
+        //追加:バックグラウンドに隠れていた時間も読み取り時間へ含めない。
+        private void OnApplicationPause(bool paused)
+        {
+            applicationPaused = paused;
+            if (paused)
+            {
+                preparationTiming.Invalidate();
+                resultTiming.Invalidate();
+            }
+        }
+
+        private void OnApplicationFocus(bool focused)
+        {
+            applicationFocused = focused;
+            if (!focused)
+            {
+                preparationTiming.Invalidate();
+                resultTiming.Invalidate();
+            }
+        }
+
+        //追加:T20はフェード開始前にtrue、読み終えられる状態になってからfalseを渡す。
+        public void SetTransitionObscured(bool obscured)
+        {
+            transitionObscured = obscured;
+            if (obscured)
+            {
+                preparationTiming.Invalidate();
+                resultTiming.Invalidate();
+            }
+        }
+
+        private void ObserveReadableDisplay()
+        {
+            var state = view?.Public;
+            double now = Time.realtimeSinceStartupAsDouble;
+            preparationTiming.Observe(state?.matchId, state?.stateVersion ?? -1, PreparationReadable(state), now);
+            //追加:公開盤面の受信前に切断されても、中断文字の表示を同じ経路で完了できる。
+            resultTiming.Observe(state?.matchId ?? "connection-interrupted", state?.stateVersion ?? -1, ResultReadable(view), now);
+        }
+
+        private bool TextReadable(TMP_Text text)
+        {
+            if (!isActiveAndEnabled || applicationPaused || !applicationFocused || transitionObscured || ModalOpen ||
+                (MatchInteractionController.Instance != null && MatchInteractionController.Instance.HistoryOpen) ||
+                text == null || !text.isActiveAndEnabled ||
+                text.color.a < 0.999f || text.canvas == null || !text.canvas.isActiveAndEnabled ||
+                text.canvasRenderer.GetAlpha() < 0.999f)
+            {
+                return false;
+            }
+            //追加:親のCanvasGroupがフェード中なら、その時間を最低表示時間へ含めない。
+            for (var parent = text.transform; parent != null; parent = parent.parent)
+            {
+                foreach (var group in parent.GetComponents<CanvasGroup>())
+                {
+                    if (group.enabled && group.alpha < 0.999f)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private bool PreparationReadable(PublicMatchMessage state)
+        {
+            return state != null && view?.Public == state && state.matchPhase == (int)MatchPhase.Preparing &&
+                shownMatch == state.matchId && shownVersion == state.stateVersion &&
+                preparationPanel != null && preparationPanel.activeInHierarchy && TextReadable(preparationText) &&
+                !string.IsNullOrEmpty(preparationText.text) &&
+                preparationText.text.Contains(MatchHudDisplay.InitialOrder(state, view.LocalPlayer)) &&
+                preparationText.text.Contains(state.initialCardsDealt ? "初期手札を配りました" : "手札を配ります");
+        }
+
+        private bool ResultReadable(MatchClientState current)
+        {
+            if (current == null || current != view ||
+                (!current.HasConfirmedResult && !current.CommunicationInterrupted &&
+                current.Public?.matchPhase != (int)MatchPhase.Interrupted) || !TextReadable(resultText))
+            {
+                return false;
+            }
+            string expected = current.HasConfirmedResult ? (current.Public.winner == current.LocalPlayer ? "勝利" : "敗北") : "通信中断";
+            return resultText.text?.EndsWith(expected, System.StringComparison.Ordinal) == true;
+        }
+
+        //追加:結果受信・最後の動きとは別に、実際の勝敗文字の表示完了を照会する。
+        public static bool CanLeaveResult(MatchClientState current)
+        {
+            var presenter = Instance;
+            var state = current?.Public;
+            return presenter != null && presenter.ResultReadable(current) &&
+                presenter.resultTiming.IsComplete(state?.matchId ?? "connection-interrupted", state?.stateVersion ?? -1, Time.realtimeSinceStartupAsDouble,
+                    presenter.minimumResultDisplaySeconds);
         }
 
         private void OnDestroy()
@@ -108,8 +231,12 @@ namespace Waribasi.Presentation
         public static bool CanAcknowledgePreparation(PublicMatchMessage state)
         {
             var presenter = Instance;
-            return presenter == null || (state != null && presenter.shownMatch == state.matchId &&
-                presenter.shownVersion == state.stateVersion && Time.unscaledTime - presenter.shownAt >= 0.75f);
+            //変更:未生成・非表示の時間を含めず、各準備段階の文字が読めてから応答する。
+            //削除:return presenter == null || (state != null && presenter.shownMatch == state.matchId &&
+            //    presenter.shownVersion == state.stateVersion && Time.unscaledTime - presenter.shownAt >= 0.75f);
+            return presenter != null && presenter.PreparationReadable(state) &&
+                presenter.preparationTiming.IsComplete(state.matchId, state.stateVersion, Time.realtimeSinceStartupAsDouble,
+                    presenter.minimumPreparationDisplaySeconds);
         }
 
         public void OpenMenu()
@@ -230,18 +357,19 @@ namespace Waribasi.Presentation
             }
         }
 
-        public void ReturnTitle()
-        {
-            if (IsActiveMatch())
-            {
-                Ask("Title", "降参してタイトルへ戻りますか？");
-            }
-            else
-            {
-                //変更:現在の対戦モードを終了してタイトルへ戻る。
-                MatchSessionAccess.Leave("Title");
-            }
-        }
+        //削除:Endのタイトル操作を撤去し、モード選択への戻りへ統一する。
+        //public void ReturnTitle()
+        //{
+        //    if (IsActiveMatch())
+        //    {
+        //        Ask("Title", "降参してタイトルへ戻りますか？");
+        //    }
+        //    else
+        //    {
+        //        //変更:現在の対戦モードを終了してタイトルへ戻る。
+        //        MatchSessionAccess.Leave("Title");
+        //    }
+        //}
 
         public static string ResultReason(MatchClientState current)
         {
@@ -270,6 +398,14 @@ namespace Waribasi.Presentation
             //追加:NPC用の待機と再戦表示を選ぶ。
             bool local = MatchSessionAccess.IsLocal;
             bool active = IsActiveMatch();
+            //追加:決着後に残ったメニューや履歴で勝敗文字を隠さない。切断通知で同じ結果の待ちを再開しない。
+            if (view != null && (view.HasConfirmedResult || view.CommunicationInterrupted ||
+                state?.matchPhase == (int)MatchPhase.Interrupted) && resultShownMatch != (state?.matchId ?? "connection-interrupted"))
+            {
+                resultShownMatch = state?.matchId ?? "connection-interrupted";
+                CloseMenu();
+                MatchHudPresenter.Instance?.ShowHistory(false);
+            }
             if (preparationText != null)
             {
                 //変更:先後手は開始時の主表示に集約し、同じ準備経路で再戦にも表示する。

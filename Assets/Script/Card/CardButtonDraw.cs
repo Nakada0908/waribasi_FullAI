@@ -47,7 +47,13 @@ public class CardButtonDraw : MonoBehaviour
             cardGroups = new CanvasGroup[buttons.Length];
             for (int index = 0; index < buttons.Length; index++)
             {
-                cardGroups[index] = buttons[index].GetComponent<CanvasGroup>() ?? buttons[index].gameObject.AddComponent<CanvasGroup>();
+                //変更:CanvasGroupの有無をTryGetComponentで確認し、ない場合だけ追加する。
+                //削除:cardGroups[index] = buttons[index].GetComponent<CanvasGroup>() ?? buttons[index].gameObject.AddComponent<CanvasGroup>();
+                if (!buttons[index].TryGetComponent<CanvasGroup>(out var group))
+                {
+                    group = buttons[index].gameObject.AddComponent<CanvasGroup>();
+                }
+                cardGroups[index] = group;
                 //追加:Button側の半透明と重ねず、札全体の透明度をCanvasGroupで揃える。
                 var colors = buttons[index].colors;
                 colors.disabledColor = colors.normalColor;

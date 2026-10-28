@@ -15,7 +15,9 @@ public class RestartGame : MonoBehaviour
 
     public void OnClickRestartButton()
     {
-        MatchFlowPresenter.Instance?.ReturnTitle();
+        //変更:旧ボタン入口も結果画面からモード選択へ戻る操作へそろえる。
+        //削除:MatchFlowPresenter.Instance?.ReturnTitle();
+        MatchFlowPresenter.Instance?.ReturnMode();
     }
 
     public void OnClickQuitGameButton()

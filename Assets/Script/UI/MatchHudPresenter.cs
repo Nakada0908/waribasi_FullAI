@@ -32,8 +32,9 @@ namespace Waribasi.Presentation
         private string renderedMatch;
         private long renderedVersion = -1;
         private int renderedHistory = -1;
-        private PublicMatchMessage clockState;
-        private double clockReceivedAt;
+        //削除:HUDの再描画時刻を受信時刻として扱っていた代替時計。
+        //private PublicMatchMessage clockState;
+        //private double clockReceivedAt;
         private string notification;
         private float notificationUntil;
 
@@ -84,11 +85,12 @@ namespace Waribasi.Presentation
             string npcLabel = MatchSessionAccess.IsLocal
                 ? NpcMatchEntry.DifficultyLabel(MatchSessionAccess.Local.Session.Setup.Difficulty) : null;
             turnText.text = MatchHudDisplay.Turn(state, view?.LocalPlayer ?? -1, view?.CommunicationInterrupted ?? false, npcLabel);
-            if (clockState != state)
-            {
-                clockState = state;
-                clockReceivedAt = Time.unscaledTimeAsDouble;
-            }
+            //変更:時計標本はMatchClientStateが実受信時に保持する。HUDの再描画では更新しない。
+            //削除:if (clockState != state)
+            //{
+            //    clockState = state;
+            //    clockReceivedAt = Time.unscaledTimeAsDouble;
+            //}
             if (state == null || renderedMatch != state.matchId)
             {
                 renderedMatch = state?.matchId;
@@ -207,8 +209,12 @@ namespace Waribasi.Presentation
                 return;
             }
             var manager = NetworkManager.Singleton;
+            //変更:接続中は正式期限と同じServerTimeだけを使用し、経過時間を二重加算しない。
+            //代替時計の経過は受信時と同じrealtime基準で一度だけ加算する。
+            //削除:double now = manager != null && manager.IsListening ? manager.ServerTime.Time :
+            //    MatchHudDisplay.EstimatedServerTime(state.serverTime, clockReceivedAt, Time.unscaledTimeAsDouble);
             double now = manager != null && manager.IsListening ? manager.ServerTime.Time :
-                MatchHudDisplay.EstimatedServerTime(state.serverTime, clockReceivedAt, Time.unscaledTimeAsDouble);
+                MatchHudDisplay.EstimatedServerTime(state.serverTime, view.PublicReceivedAt, Time.realtimeSinceStartupAsDouble);
             timerText.text = MatchHudDisplay.Timer(state, now);
             timerText.color = MatchHudDisplay.TimerUrgent(state, now) ? urgentColor : new Color(0.12f, 0.18f, 0.23f);
         }

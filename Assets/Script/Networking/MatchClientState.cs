@@ -18,6 +18,8 @@ namespace Waribasi.Networking
         private ulong nextRequest = 1;
 
         public PublicMatchMessage Public { get; private set; }
+        //追加:HUDの生成・再購読時刻ではなく、採用した公開状態の実受信時刻を保持する。
+        public double PublicReceivedAt { get; private set; }
         public int LocalPlayer { get; private set; } = -1;
         public IReadOnlyList<HandCard> OwnHand => cards;
         public IReadOnlyList<CardUseMessage> History => history.AsReadOnly();
@@ -50,6 +52,8 @@ namespace Waribasi.Networking
             //追加:モードを切り替えた既存表示状態も現在の参照へ戻す。
             Instance = this;
             Public = null;
+            //追加:再戦で前の試合の時計標本を使わない。
+            PublicReceivedAt = 0;
             own = null;
             cards = Array.Empty<HandCard>();
             history.Clear();
@@ -68,6 +72,8 @@ namespace Waribasi.Networking
                 return;
             }
             Public = MatchMessages.LocalPublic(authority, stage, now);
+            //追加:ローカル状態も公開時刻と同時に受領基点を記録する。
+            PublicReceivedAt = Time.realtimeSinceStartupAsDouble;
             LocalPlayer = (int)player;
             own = MatchMessages.OwnHand(authority, player);
             cards = Array.AsReadOnly(own.cards.Select(card => card.ToCard()).ToArray());
@@ -95,6 +101,8 @@ namespace Waribasi.Networking
                 return false;
             }
             Public = message;
+            //追加:変更通知より先に記録し、重複・旧配信・本人札・履歴・取消では更新しない。
+            PublicReceivedAt = Time.realtimeSinceStartupAsDouble;
             LocalPlayer = seat;
             Changed?.Invoke();
             return true;

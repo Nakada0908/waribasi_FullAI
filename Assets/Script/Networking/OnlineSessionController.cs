@@ -15,7 +15,11 @@ namespace Waribasi.Networking
     {
         //変更:封印・スキップの異なる旧版と接続・ランダム検索を混在させない。
         //削除:public const string Protocol = "waribasi-session-v1";
-        public const string Protocol = "waribasi-session-v2";
+        //変更:ランダム固定30秒の旧版とは設定検証が異なるため、接続と検索を分ける。
+        //削除:public const string Protocol = "waribasi-session-v2";
+        //変更:T16の結果表示完了RPCを持たない旧版と混在して待ち続けない。
+        //削除:public const string Protocol = "waribasi-session-v3";
+        public const string Protocol = "waribasi-session-v4";
         private const string Channel = "waribasi/session/v1";
         private const float SettingsDisplaySeconds = 0.75f;
         private const int MaximumMessageBytes = 4096;
@@ -64,6 +68,8 @@ namespace Waribasi.Networking
         private bool peerLeft;
         private bool resultReady;
         private bool loading;
+        //追加:切断が重なってもローカル結果遷移は1本にまとめる。
+        private bool openingLocalResult;
         private string pendingScene;
         private string departure;
         private bool surrenderSent;
@@ -223,7 +229,11 @@ namespace Waribasi.Networking
             {
                 SendSnapshot(ControlKind.Offer);
             }
-            if (pendingScene != null && !loading && manager != null && manager.IsHost)
+            //変更:結果遷移は常駐側でも表示完了を確認し、別経路の通知で待ちを飛ばさない。
+            //削除:if (pendingScene != null && !loading && manager != null && manager.IsHost)
+            if (pendingScene != null && !loading && manager != null && manager.IsHost &&
+                (pendingScene != "End" || departure == null || HasPeer) &&
+                (pendingScene != "End" || SceneManager.GetActiveScene().name != "Game" || ResultDisplayComplete()))
             {
                 string next = pendingScene;
                 var progress = manager.SceneManager.LoadScene(next, LoadSceneMode.Single);
@@ -296,7 +306,12 @@ namespace Waribasi.Networking
             {
                 view?.InterruptLocally();
                 SetStatus("相手との接続が終了しました");
-                StartCoroutine(OpenLocalResult());
+                //変更:切断後も、確定済みの勝敗または中断文字を読んでから移動する。
+                if (!openingLocalResult)
+                {
+                    openingLocalResult = true;
+                    StartCoroutine(OpenLocalResult());
+                }
             }
             else
             {
@@ -306,11 +321,29 @@ namespace Waribasi.Networking
 
         private IEnumerator OpenLocalResult()
         {
-            yield return null;
-            if (SceneManager.GetActiveScene().name != "End" && !returning)
+            //変更:固定1フレームだけの待ちを、描画起点の最低表示時間へ置き換える。
+            //削除:yield return null;
+            while (!returning && SceneManager.GetActiveScene().name == "Game" && !ResultDisplayComplete())
             {
-                SceneManager.LoadScene("End");
+                yield return null;
             }
+            //追加:退出要求がある端末では、同じ完了条件を満たしたProcessDepartureだけが移動する。
+            if (SceneManager.GetActiveScene().name == "Game" && !returning && !loading && departure == null)
+            {
+                loading = true;
+                SceneManager.LoadScene("End");
+                loading = false;
+            }
+            openingLocalResult = false;
+        }
+
+        //追加:表示待機を退出・切断・通常結果で共有し、待機秒数を重ねない。
+        private bool ResultDisplayComplete()
+        {
+            var match = MatchNetworkController.Instance;
+            //追加:切断後はNGOのScene管理へ進まず、各端末の文字表示完了だけを待つ。
+            return manager != null && manager.IsListening && match != null && match.IsSpawned ? match.CanCompleteResultPresentation :
+                Waribasi.Presentation.MatchFlowPresenter.CanLeaveResult(view);
         }
 
         private void ObserveMatch()
@@ -346,13 +379,11 @@ namespace Waribasi.Networking
             {
                 resultObservedAt = Time.realtimeSinceStartupAsDouble;
             }
-            if (state.matchPhase == (int)MatchPhase.Interrupted)
-            {
-                if (IsHost)
-                {
-                    QueueResultScene();
-                }
-            }
+            //変更:中断もMatchNetworkControllerが表示完了応答を確認してから遷移する。
+            //削除:if (state.matchPhase == (int)MatchPhase.Interrupted)
+            //{
+            //    if (IsHost) { QueueResultScene(); }
+            //}
             Notify();
         }
 
@@ -488,6 +519,13 @@ namespace Waribasi.Networking
                     surrenderSent = MatchNetworkController.Instance != null && MatchNetworkController.Instance.SendSurrender();
                 }
                 SetStatus("降参の結果を確認しています");
+                return;
+            }
+            //追加:相手の切断と退出要求が重なっても、Gameの勝敗・中断表示を省略しない。
+            if (SceneManager.GetActiveScene().name == "Game" && view != null &&
+                (view.HasConfirmedResult || view.CommunicationInterrupted || state?.matchPhase == (int)MatchPhase.Interrupted) &&
+                !ResultDisplayComplete())
+            {
                 return;
             }
             if (view != null && view.HasConfirmedResult && HasPeer && SceneManager.GetActiveScene().name != "End")
@@ -685,7 +723,9 @@ namespace Waribasi.Networking
                 message.round < 1 || message.phase < 0 || message.phase > (int)SessionPhase.Closed ||
                 message.mode < (int)MatchMode.Room || message.mode > (int)MatchMode.Random ||
                 message.first < 0 || message.first > (int)FirstTurnSetting.PlayerB || !MatchAuthority.IsAllowedTime(message.seconds) ||
-                (message.mode == (int)MatchMode.Random && (message.first != 0 || message.seconds != 30)))
+                //変更:参加側もランダム対戦の1分固定を検証する。
+                //削除:(message.mode == (int)MatchMode.Random && (message.first != 0 || message.seconds != 30)))
+                (message.mode == (int)MatchMode.Random && (message.first != 0 || message.seconds != MatchSetup.DefaultTurnSeconds)))
             {
                 return;
             }

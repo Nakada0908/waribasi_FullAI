@@ -31,6 +31,9 @@ namespace Waribasi.Networking
         private readonly HashSet<ulong> loadedClients = new HashSet<ulong>();
         private readonly HashSet<ulong> readyClients = new HashSet<ulong>();
         private readonly HashSet<ulong> resultReceipts = new HashSet<ulong>();
+        //追加:正式結果の受領と、文字を読み終えた応答は分けて保持する。
+        private readonly HashSet<ulong> resultPresentations = new HashSet<ulong>();
+        private long resultPresentedVersion = -1;
         private MatchAuthority authority;
         private MatchClientState view;
         private bool processing;
@@ -47,9 +50,15 @@ namespace Waribasi.Networking
         private Vector3 moveContact;
         private double movementStarted;
         private static FirstPlayerChoice nextFirst = FirstPlayerChoice.Random;
-        private static int nextTurnSeconds = 30;
+        //変更:UIを経由しない開始にも共通の1分を適用する。
+        //削除:private static int nextTurnSeconds = 30;
+        private static int nextTurnSeconds = MatchSetup.DefaultTurnSeconds;
 
+        //追加:正式期限・演出終了・配信serverTimeの時計所有者。HUDも同じServerTimeを参照する。
         private double Now => NetworkManager.ServerTime.Time;
+        //追加:開発用計測は操作開始からの実時間を比較し、カード配信では基点を戻さない。
+        private double tracedDeadline = -1;
+        private double tracedOpenedAt;
         public MatchClientState ClientState => view;
 
         //追加:T05の開始前取消だけを正式な中断へ接続する。
@@ -68,15 +77,20 @@ namespace Waribasi.Networking
         }
 
         //T05は接続開始前に設定する。試合中の変更には使わない。
+        //変更:ルーム省略値も1分とする。
+        //削除:public static void ConfigureNextMatch(bool randomMatch, FirstPlayerChoice first = FirstPlayerChoice.Random,
+        //    int turnSeconds = 30)
         public static void ConfigureNextMatch(bool randomMatch, FirstPlayerChoice first = FirstPlayerChoice.Random,
-            int turnSeconds = 30)
+            int turnSeconds = MatchSetup.DefaultTurnSeconds)
         {
             if (!MatchAuthority.IsAllowedTime(turnSeconds) || first < FirstPlayerChoice.Random || first > FirstPlayerChoice.Guest)
             {
                 throw new ArgumentException("Invalid match settings.");
             }
             nextFirst = randomMatch ? FirstPlayerChoice.Random : first;
-            nextTurnSeconds = randomMatch ? 30 : turnSeconds;
+            //変更:ランダム固定値は設定転送と同じ共通定義を使用する。
+            //削除:nextTurnSeconds = randomMatch ? 30 : turnSeconds;
+            nextTurnSeconds = randomMatch ? MatchSetup.DefaultTurnSeconds : turnSeconds;
         }
 
         public override void OnNetworkSpawn()
@@ -173,9 +187,16 @@ namespace Waribasi.Networking
                 ApplyHandPoses();
                 Publish();
             }
-            if (authority.State.MatchPhase == MatchPhase.Finished && !loadingEnd && endedAt >= 0 &&
-                now - endedAt >= MatchAuthority.PresentationSeconds &&
-                (resultReceipts.Count == 2 || now - endedAt >= ResultReceiptTimeoutSeconds))
+            //変更:受領待ち・文字表示・最後の動きを並行して確認する。表示完了を受領タイムアウトで飛ばさない。
+            //削除:if (authority.State.MatchPhase == MatchPhase.Finished && !loadingEnd && endedAt >= 0 &&
+            //    now - endedAt >= MatchAuthority.PresentationSeconds &&
+            //    (resultReceipts.Count == 2 || now - endedAt >= ResultReceiptTimeoutSeconds))
+            if ((authority.State.MatchPhase == MatchPhase.Finished || authority.State.MatchPhase == MatchPhase.Interrupted) &&
+                !loadingEnd && endedAt >= 0 && movingHand == null &&
+                NetworkManager.ConnectedClientsIds.All(id => resultPresentations.Contains(id)) &&
+                (authority.State.MatchPhase == MatchPhase.Interrupted ||
+                    NetworkManager.ConnectedClientsIds.All(id => resultReceipts.Contains(id)) ||
+                    now - endedAt >= ResultReceiptTimeoutSeconds))
             {
                 loadingEnd = true;
                 //変更:常駐セッションにScene遷移を集約し、Endでも再戦を扱う。
@@ -270,12 +291,25 @@ namespace Waribasi.Networking
                 resultSentVersion = state.stateVersion;
                 ResultReceivedRpc(state.matchId, state.stateVersion);
             }
+            //追加:勝敗文字の実表示完了を両端末で確認する。通常攻撃の演出定数は変更しない。
+            if ((state.matchPhase == (int)MatchPhase.Finished || state.matchPhase == (int)MatchPhase.Interrupted) &&
+                resultPresentedVersion != state.stateVersion && CanCompleteResultPresentation)
+            {
+                resultPresentedVersion = state.stateVersion;
+                ResultPresentedRpc(state.matchId, state.stateVersion);
+            }
             if (view.History.Count < state.historyCount && Time.realtimeSinceStartupAsDouble - lastResync >= 0.5)
             {
                 lastResync = Time.realtimeSinceStartupAsDouble;
                 ResyncRpc(state.matchId, view.History.Count);
             }
         }
+
+        //追加:ホストは実際の移動終了、参加側は決着受信後の演出区間も満たしてから応答する。
+        public bool CanCompleteResultPresentation => movingHand == null &&
+            Waribasi.Presentation.MatchFlowPresenter.CanLeaveResult(view) &&
+            (IsServer || view.Public == null || view.Public.endReason != (int)MatchEndReason.HandsEliminated ||
+                Time.realtimeSinceStartupAsDouble - view.PublicReceivedAt >= MatchAuthority.PresentationSeconds);
 
         private bool IsLocalDisplayReady()
         {
@@ -425,6 +459,23 @@ namespace Waribasi.Networking
             });
         }
 
+        //追加:接続・試合ID・版を検証し、再戦や遅延した表示応答を混ぜない。
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        private void ResultPresentedRpc(FixedString64Bytes matchId, long version, RpcParams rpcParams = default)
+        {
+            ulong sender = rpcParams.Receive.SenderClientId;
+            Enqueue(() =>
+            {
+                //追加:準備中断ではPlayerObject未生成もあり得るため、表示応答は確定席と接続で本人を確認する。
+                if (IsServer && authority != null && seats.ContainsKey(sender) && NetworkManager.ConnectedClients.ContainsKey(sender) &&
+                    matchId.ToString() == authority.MatchId.ToString("N") && version == authority.State.StateVersion &&
+                    (authority.State.MatchPhase == MatchPhase.Finished || authority.State.MatchPhase == MatchPhase.Interrupted))
+                {
+                    resultPresentations.Add(sender);
+                }
+            });
+        }
+
         private void Publish()
         {
             MirrorState();
@@ -435,7 +486,9 @@ namespace Waribasi.Networking
                     SendState(peer.Key, peer.Value);
                 }
             }
-            if (authority.State.MatchPhase == MatchPhase.Finished && endedAt < 0)
+            //変更:勝敗未確定の中断も、文字が表示された後に結果画面へ進む。
+            //削除:if (authority.State.MatchPhase == MatchPhase.Finished && endedAt < 0)
+            if ((authority.State.MatchPhase == MatchPhase.Finished || authority.State.MatchPhase == MatchPhase.Interrupted) && endedAt < 0)
             {
                 endedAt = Now;
             }
@@ -480,16 +533,39 @@ namespace Waribasi.Networking
         {
             if (IsServerMessage(rpcParams, json) && view.ReceivePublic(JsonUtility.FromJson<PublicMatchMessage>(json), NetworkManager.LocalClientId))
             {
-                receivedAt = Time.realtimeSinceStartupAsDouble;
+                //変更:準備待ちと代替表示時計の受信基点をそろえる。
+                //削除:receivedAt = Time.realtimeSinceStartupAsDouble;
+                receivedAt = view.PublicReceivedAt;
+                //追加:通常版の呼出しはConditional属性により除去される。
+                TraceClock(view.Public, "public");
             }
+        }
+
+        //追加:早い敗北の再報告時に、ホストの期限と参加側の表示時計・実経過を比較する。
+        [System.Diagnostics.Conditional("UNITY_EDITOR"), System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private void TraceClock(PublicMatchMessage state, string receipt)
+        {
+            double realtime = Time.realtimeSinceStartupAsDouble;
+            if (state.hasDeadline && tracedDeadline != state.deadline)
+            {
+                tracedDeadline = state.deadline;
+                tracedOpenedAt = realtime;
+            }
+            Debug.Log(FormattableString.Invariant($"[T15.Clock] role={(IsServer ? "host" : "guest")} receipt={receipt} canAct={view.CanAct} handCurrent={view.HandIsCurrent} pending={view.HasPendingRequest} match={state.matchId} turn={state.turnNumber} sequence={state.sequence} phase={state.matchPhase} gate={state.gate} seconds={state.turnSeconds} snapshot={state.serverTime:F3} now={Now:F3} deadline={(state.hasDeadline ? state.deadline : -1):F3} measuredDeadline={tracedDeadline:F3} remaining={(state.hasDeadline ? state.deadline - Now : -1):F3} acceptingElapsed={(tracedDeadline >= 0 ? realtime - tracedOpenedAt : -1):F3} realtime={realtime:F3} endReason={state.endReason}"));
         }
 
         [Rpc(SendTo.SpecifiedInParams, InvokePermission = RpcInvokePermission.Server)]
         private void OwnHandRpc(string json, RpcParams rpcParams = default)
         {
-            if (IsServerMessage(rpcParams, json))
+            //変更:採用した本人札の到着時にも、実際の操作可否と時計を開発用に記録する。
+            //削除:if (IsServerMessage(rpcParams, json))
+            //{
+            //    view.ReceiveOwn(JsonUtility.FromJson<OwnHandMessage>(json));
+            //}
+            if (IsServerMessage(rpcParams, json) && view.ReceiveOwn(JsonUtility.FromJson<OwnHandMessage>(json)))
             {
-                view.ReceiveOwn(JsonUtility.FromJson<OwnHandMessage>(json));
+                //追加:公開配信から本人札到着までの入力待ちも切り分ける。
+                TraceClock(view.Public, "hand");
             }
         }
 

@@ -43,11 +43,15 @@ namespace Waribasi.MatchFlow.Tests
         [TestCase(300)]
         [TestCase(600)]
         [TestCase(0)]
-        public void RandomModeAlwaysUsesThirtySecondsAndRandomFirst(int seconds)
+        //変更:ランダムの固定値を1分へ変更し、8択を渡しても固定されることを確認する。
+        //削除:public void RandomModeAlwaysUsesThirtySecondsAndRandomFirst(int seconds)
+        public void RandomModeAlwaysUsesSixtySecondsAndRandomFirst(int seconds)
         {
             var setup = new MatchSetup(MatchMode.Random, FirstTurnSetting.PlayerB, seconds);
             Assert.That(setup.First, Is.EqualTo(FirstTurnSetting.Random));
-            Assert.That(setup.TurnSeconds, Is.EqualTo(30));
+            //変更:既定値の参照だけでなく、実際に60秒であることを検証する。
+            //削除:Assert.That(setup.TurnSeconds, Is.EqualTo(30));
+            Assert.That(setup.TurnSeconds, Is.EqualTo(60));
             Assert.That(new MatchSetup(MatchMode.Npc, FirstTurnSetting.PlayerA, seconds).TurnSeconds, Is.Zero);
         }
 

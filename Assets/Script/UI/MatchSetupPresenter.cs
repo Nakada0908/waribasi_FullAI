@@ -35,7 +35,9 @@ namespace Waribasi.Presentation
         [SerializeField] private Button cancelButton;
         private OnlineSessionController session;
         private int first;
-        private int timeIndex = 1;
+        //変更:既存8択の1分を初期選択にする。
+        //削除:private int timeIndex = 1;
+        private int timeIndex = MatchSetup.DefaultTimeIndex;
         private int difficulty;
         private int npcFirst;
         private int lastStart;

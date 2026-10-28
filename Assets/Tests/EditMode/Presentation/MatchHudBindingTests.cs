@@ -137,7 +137,9 @@ namespace Waribasi.Presentation.Tests
         [Test]
         public void SelectionRefreshDoesNotRestartTheClockBetweenPublicSnapshots()
         {
-            Set(hud, "clockReceivedAt", Time.unscaledTimeAsDouble - 5);
+            //変更:HUD内部ではなく、受信状態の時計標本から取消後の残秒も計算する。
+            //削除:Set(hud, "clockReceivedAt", Time.unscaledTimeAsDouble - 5);
+            Set(view, "<PublicReceivedAt>k__BackingField", Time.realtimeSinceStartupAsDouble - 5.25);
             Call(interaction, "OpenRedistribution");
             Assert.That(timer.text, Is.EqualTo("25秒"));
             Call(interaction, "CancelSelection");
@@ -155,6 +157,53 @@ namespace Waribasi.Presentation.Tests
             Assert.That(message.gameObject.activeSelf, Is.False);
             Assert.That(timer.gameObject.activeSelf, Is.False);
             Assert.That(backs.All(card => !card.activeSelf), Is.True);
+        }
+
+        //追加:遅れてHUDを描いても、実受信後の経過を捨てたり再描画で満額に戻したりしない。
+        [Test]
+        public void LateHudBindingUsesReceiptTimeAndLocalControlsNeverResetIt()
+        {
+            double receivedAt = Time.realtimeSinceStartupAsDouble - 10.25;
+            Set(view, "<PublicReceivedAt>k__BackingField", receivedAt);
+            Call(hud, "Refresh");
+            Assert.That(timer.text, Is.EqualTo("20秒"));
+            Call(interaction, "SetModalBlocked", true);
+            Call(interaction, "SetModalBlocked", false);
+            Call(interaction, "SetHistoryOpen", true);
+            Call(interaction, "SetHistoryOpen", false);
+            Call(interaction, "CancelSelection");
+            Call(hud, "Refresh");
+            Assert.That(view.GetType().GetProperty("PublicReceivedAt").GetValue(view), Is.EqualTo(receivedAt));
+            Assert.That(state.deadline, Is.EqualTo(130));
+            Assert.That(timer.text, Is.EqualTo("20秒"));
+        }
+
+        //追加:旧配信や本人札では受信基点を変えず、再戦の初期化だけが標本を破棄する。
+        [Test]
+        public void RejectedPublicAndPrivateUpdatesPreserveReceiptSample()
+        {
+            Set(view, "<PublicReceivedAt>k__BackingField", -123d);
+            Assert.That(Call(view, "ReceivePublic", state, 0UL), Is.False);
+            Call(view, "ReceiveHistory", new HistoryPageMessage { matchId = state.matchId, offset = 0, records = Array.Empty<CardUseMessage>() });
+            Assert.That(view.GetType().GetProperty("PublicReceivedAt").GetValue(view), Is.EqualTo(-123d));
+            var next = MatchMessages.Public(new MatchAuthority(Guid.ParseExact(state.matchId, "N"),
+                RuleEngine.FromPosition(new PlayerHands(1, 1), new PlayerHands(1, 1), PlayerId.PlayerA), 30, 100), 0, 7, 3, 100);
+            next.sequence = state.sequence + 1;
+            bool observed = false;
+            Action changed = () => observed = (double)view.GetType().GetProperty("PublicReceivedAt").GetValue(view) != -123;
+            var changedEvent = view.GetType().GetEvent("Changed");
+            changedEvent.AddEventHandler(view, changed);
+            try
+            {
+                Assert.That(Call(view, "ReceivePublic", next, 0UL), Is.True);
+                Assert.That(observed, Is.True);
+                Call(view, "ResetForNewMatch");
+                Assert.That(view.GetType().GetProperty("PublicReceivedAt").GetValue(view), Is.EqualTo(0d));
+            }
+            finally
+            {
+                changedEvent.RemoveEventHandler(view, changed);
+            }
         }
 
         [Test]

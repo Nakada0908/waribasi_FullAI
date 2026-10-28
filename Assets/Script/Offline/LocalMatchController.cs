@@ -51,7 +51,9 @@ namespace Waribasi.Presentation
         private Vector3 moveOrigin;
         private Vector3 moveContact;
         private double moveAt;
-        private double endedAt;
+        //削除:結果受信からの固定待機は、表示完了と動きの完了へ統合する。
+        //private double endedAt;
+        private string departure;
         private bool leaving;
         public LocalMatchSession Session { get; private set; }
         public MatchClientState View { get; private set; }
@@ -154,7 +156,9 @@ namespace Waribasi.Presentation
             hands.Clear();
             moving = null;
             stage = 0;
-            endedAt = -1;
+            //変更:再戦に前試合の退出要求を残さない。
+            //削除:endedAt = -1;
+            departure = null;
             View.ResetForNewMatch();
             Publish();
             Load("Game");
@@ -209,7 +213,12 @@ namespace Waribasi.Presentation
             preparing = true;
             ApplyPoses();
             Publish();
-            yield return new WaitForSecondsRealtime(0.8f);
+            //変更:固定0.8秒を足さず、オンラインと同じ実表示完了を待って配布する。
+            //削除:yield return new WaitForSecondsRealtime(0.8f);
+            while (Active && epoch == generation && !leaving && !MatchFlowPresenter.CanAcknowledgePreparation(View.Public))
+            {
+                yield return null;
+            }
             if (!Active || epoch != generation || leaving)
             {
                 yield break;
@@ -217,7 +226,12 @@ namespace Waribasi.Presentation
             Session.Authority.DealInitialCards();
             stage = 1;
             Publish();
-            yield return new WaitForSecondsRealtime(0.8f);
+            //変更:配布表示も同じ最低時間を満たしてから正式に開始する。
+            //削除:yield return new WaitForSecondsRealtime(0.8f);
+            while (Active && epoch == generation && !leaving && !MatchFlowPresenter.CanAcknowledgePreparation(View.Public))
+            {
+                yield return null;
+            }
             if (!Active || epoch != generation || leaving)
             {
                 yield break;
@@ -251,14 +265,20 @@ namespace Waribasi.Presentation
             ObserveNpcTurn();
             if (authority.State.MatchPhase == MatchPhase.Finished)
             {
-                if (endedAt < 0)
+                //変更:最後の手の動きと勝敗文字は並行して待ち、両方の完了後だけSceneを破棄する。
+                //削除:if (endedAt < 0) { endedAt = Now; }
+                //削除:if (Now - endedAt >= 1.05)
+                if (moving == null && MatchFlowPresenter.CanLeaveResult(View))
                 {
-                    endedAt = Now;
-                }
-                if (Now - endedAt >= 1.05)
-                {
-                    hands.Clear();
-                    Load("End");
+                    if (departure != null)
+                    {
+                        CompleteLeave(departure);
+                    }
+                    else
+                    {
+                        hands.Clear();
+                        Load("End");
+                    }
                 }
             }
             else if (authority.Gate == InputGate.Accepting && authority.State.CurrentPlayer == Session.Npc && thinking == null)
@@ -543,7 +563,9 @@ namespace Waribasi.Presentation
 
         public void Leave(string destination)
         {
-            if (!Active || leaving || (destination != "StartGame" && destination != "Title" && destination != "Quit"))
+            //変更:表示待機中の連打も最初の退出要求へまとめる。
+            //削除:if (!Active || leaving || (destination != "StartGame" && destination != "Title" && destination != "Quit"))
+            if (!Active || leaving || departure != null || (destination != "StartGame" && destination != "Title" && destination != "Quit"))
             {
                 return;
             }
@@ -551,7 +573,19 @@ namespace Waribasi.Presentation
             {
                 Surrender();
             }
+            //追加:降参退出・決着直後の退出でも、勝敗文字と進行中の最後の動きを省略しない。
+            if (Session.Authority.State.MatchPhase == MatchPhase.Finished && SceneManager.GetActiveScene().name == "Game")
+            {
+                departure = destination;
+                return;
+            }
+            CompleteLeave(destination);
+        }
+
+        private void CompleteLeave(string destination)
+        {
             leaving = true;
+            departure = null;
             generation++;
             //追加:退出時に分割探索も破棄する。
             StopThinking();
