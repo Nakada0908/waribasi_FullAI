@@ -75,7 +75,9 @@ namespace Waribasi.Presentation
             Instance = this;
             DontDestroyOnLoad(gameObject);
             //追加:このゲーム専用キーを読み、再起動後も解放を維持する。
-            NpcMatchEntry.ConfigureProgress(new NpcUnlockProgress(new PlayerPrefsNpcUnlockStore()));
+            //変更:開発時は起動中の進捗を再利用し、Controller再生成で解放を消さない。
+            //削除:NpcMatchEntry.ConfigureProgress(new NpcUnlockProgress(new PlayerPrefsNpcUnlockStore()));
+            NpcMatchEntry.ConfigureProgress(PlayerPrefsNpcUnlockStore.CreateRuntimeProgress());
             NpcMatchEntry.Register(StartNpc);
             SceneManager.sceneLoaded += OnSceneLoaded;
             //追加:外部のScene遷移でも古い探索を停止する。

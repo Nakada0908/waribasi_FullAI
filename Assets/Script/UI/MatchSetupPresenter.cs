@@ -323,6 +323,12 @@ namespace Waribasi.Presentation
             settingsText.text = SettingsLabel(session.Settings ?? (lastStart == 0 ? SelectedOnlineSetup : lastStart == 2 ? new MatchSetup(MatchMode.Random) : null));
             retryButton.gameObject.SetActive(!session.IsWorking && !session.HasSession);
             cancelButton.interactable = !cancelPending && !session.Loading;
+            //追加:起動時に残った現在選択も利用可能な難易度へ戻し、神の表示を同期する。
+            if (!NpcMatchEntry.IsStrongestUnlocked && difficulty == (int)NpcDifficulty.Strongest)
+            {
+                difficulty = (int)NpcDifficulty.Advanced;
+            }
+            RefreshStrongestOption();
             Highlight(firstButtons, first);
             Highlight(timeButtons, timeIndex);
             Highlight(difficultyButtons, difficulty);

@@ -166,6 +166,76 @@ namespace Waribasi.Presentation.Tests
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+        //追加:実際の起動中進捗へボタンを接続し、画面復帰と次回起動の表示を確認する。
+        [TestCase(false)]
+        [TestCase(true)]
+        public void RuntimeButtonReturnAndNextStartupPreserveTheReleaseSave(bool savedUnlock)
+        {
+            var storeType = RuntimeType("Waribasi.Presentation.PlayerPrefsNpcUnlockStore");
+            var flags = BindingFlags.Static | BindingFlags.NonPublic;
+            var reset = storeType.GetMethod("BeginDevelopmentRun", flags);
+            var initialize = storeType.GetMethod("InitializeProgress", flags);
+            var create = storeType.GetMethod("CreateRuntimeProgress");
+            var field = storeType.GetField("developmentProgress", flags);
+            object oldDevelopmentProgress = field.GetValue(null);
+            var handler = typeof(NpcMatchEntry).GetField("handler", flags);
+            object oldHandler = handler.GetValue(null);
+            string key = "waribasi_FullAI.tests.t17.ui." + Guid.NewGuid().ToString("N");
+            string sentinel = key + ".unrelated";
+            try
+            {
+                PlayerPrefs.SetInt(key, savedUnlock ? 1 : 0);
+                PlayerPrefs.SetInt(sentinel, 91);
+                reset.Invoke(null, null);
+                var runtime = (NpcUnlockProgress)create.Invoke(null, new object[] { key });
+                NpcMatchEntry.ConfigureProgress(runtime);
+                Call(presenter, "AddDevelopmentUnlockOption");
+                presenter.GetType().GetProperty("Page").SetValue(presenter,
+                    Enum.Parse(RuntimeType("Waribasi.Presentation.SetupPage"), "Npc"));
+                Set(presenter, "difficulty", (int)NpcDifficulty.Strongest);
+                Call(presenter, "Refresh");
+                var button = Get<Button>(presenter, "developmentUnlockButton");
+                var strongest = Get<Button[]>(presenter, "difficultyButtons")[3];
+                Assert.That(button.gameObject.activeSelf, Is.True);
+                Assert.That(strongest.gameObject.activeSelf, Is.False);
+                Assert.That(Get<int>(presenter, "difficulty"), Is.EqualTo((int)NpcDifficulty.Advanced));
+                button.onClick.Invoke();
+                Assert.That(runtime.IsStrongestUnlocked, Is.True);
+                Assert.That(button.gameObject.activeSelf, Is.False);
+                Assert.That(strongest.gameObject.activeSelf, Is.True);
+                Assert.That(Get<int>(presenter, "difficulty"), Is.EqualTo((int)NpcDifficulty.Strongest));
+                NpcMatchEntry.Register(_ => NpcStartResult.Accepted);
+                Assert.That(NpcMatchEntry.TryStart(new NpcMatchSetup(NpcDifficulty.Strongest, NpcFirstPlayerChoice.Npc)),
+                    Is.EqualTo(NpcStartResult.Accepted));
+                initialize.Invoke(null, null);
+                NpcMatchEntry.ConfigureProgress((NpcUnlockProgress)create.Invoke(null, new object[] { key }));
+                Call(presenter, "RestoreNpcSetup");
+                Call(presenter, "Refresh");
+                Assert.That(NpcMatchEntry.Progress, Is.SameAs(runtime));
+                Assert.That(Get<int>(presenter, "difficulty"), Is.EqualTo((int)NpcDifficulty.Strongest));
+                Assert.That(Get<int>(presenter, "npcFirst"), Is.EqualTo((int)NpcFirstPlayerChoice.Npc));
+                Assert.That(button.gameObject.activeSelf, Is.False);
+                Assert.That(strongest.gameObject.activeSelf, Is.True);
+                reset.Invoke(null, null);
+                initialize.Invoke(null, null);
+                Call(presenter, "Refresh");
+                Assert.That(button.gameObject.activeSelf, Is.True);
+                Assert.That(strongest.gameObject.activeSelf, Is.False);
+                Assert.That(Get<int>(presenter, "difficulty"), Is.EqualTo((int)NpcDifficulty.Advanced));
+                Assert.That(NpcMatchEntry.LastSetup.Difficulty, Is.EqualTo(NpcDifficulty.Advanced));
+                Assert.That(PlayerPrefs.GetInt(key), Is.EqualTo(savedUnlock ? 1 : 0));
+                Assert.That(PlayerPrefs.GetInt(sentinel), Is.EqualTo(91));
+            }
+            finally
+            {
+                handler.SetValue(null, oldHandler);
+                field.SetValue(null, oldDevelopmentProgress);
+                PlayerPrefs.DeleteKey(key);
+                PlayerPrefs.DeleteKey(sentinel);
+                PlayerPrefs.Save();
+            }
+        }
+
         [Test]
         public void DevelopmentButtonSavesAndSelectsGodWithoutStartingAMatch()
         {

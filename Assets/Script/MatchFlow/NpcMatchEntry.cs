@@ -61,6 +61,11 @@ namespace Waribasi.MatchFlow
         public static void ConfigureProgress(NpcUnlockProgress progress)
         {
             Progress = progress ?? throw new ArgumentNullException(nameof(progress));
+            //追加:Domain Reloadなしで残った神の選択値も、未解放の起動では上級へ戻す。
+            if (!Progress.IsStrongestUnlocked && LastSetup?.Difficulty == NpcDifficulty.Strongest)
+            {
+                LastSetup = new NpcMatchSetup(NpcDifficulty.Advanced, LastSetup.First);
+            }
         }
 
         public static string DifficultyLabel(NpcDifficulty difficulty)
