@@ -19,6 +19,8 @@ namespace Waribasi.Presentation
         private MotionHandle motion;
         private bool busy;
         private bool localLoading;
+        //追加:初回Scene通知と起動フックが重なっても明転は一度だけ開始する。
+        private bool initialRevealStarted;
         private double coverDeadline;
         private int revision;
 
@@ -51,6 +53,18 @@ namespace Waribasi.Presentation
         private static void Bootstrap()
         {
             Ensure();
+        }
+
+        //追加:初回のScene読み込み後は通知種別に依存せず明転を開始する。
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void RevealStartup()
+        {
+            var fade = Ensure();
+            if (!fade.initialRevealStarted && fade.isActiveAndEnabled && !fade.localLoading)
+            {
+                fade.initialRevealStarted = true;
+                fade.Reveal().Forget();
+            }
         }
 
         private static SceneFade Ensure()
@@ -224,6 +238,12 @@ namespace Waribasi.Presentation
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            //追加:Editorの初回通知がSingle以外でも起動時の黒い画面を解除する。
+            if (!initialRevealStarted)
+            {
+                RevealStartup();
+                return;
+            }
             if (isActiveAndEnabled && !localLoading && mode == LoadSceneMode.Single)
             {
                 Reveal().Forget();
