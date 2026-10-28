@@ -1,6 +1,4 @@
 using System.Text;
-//追加:共通ルールのスキップ候補から判断待ちを表示する。
-using System.Linq;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
@@ -17,19 +15,27 @@ namespace Waribasi.Presentation
         [SerializeField] private MatchInteractionController interaction;
         [SerializeField] private TMP_Text turnText;
         [SerializeField] private TMP_Text timerText;
-        [SerializeField] private TMP_Text cardCountsText;
         [SerializeField] private TMP_Text fingersText;
+        //変更:旧Messageは必要な操作結果だけを短時間表示する。
         [SerializeField] private TMP_Text messageText;
-        [SerializeField] private TMP_Text cardPhaseText;
+        //追加:相手の裏札は公開枚数だけで表示し、中身を受け取らない。
+        [SerializeField] private GameObject[] opponentCardBacks;
+        [SerializeField] private float opponentCardSpacing = 86;
+        [SerializeField, Min(0.5f)] private float notificationSeconds = 3;
         [SerializeField] private GameObject historyPanel;
         [SerializeField] private TMP_Text historyText;
         [SerializeField] private Button historyButton;
         [SerializeField] private Button historyCloseButton;
         [SerializeField] private ScrollRect historyScroll;
         [SerializeField] private Color urgentColor = new Color(0.85f, 0.08f, 0.08f);
-        private string initialOrder;
-        private string orderMatch;
+        //追加:現在の公開版と通知の期限を分け、札の選択で時計をリセットしない。
+        private string renderedMatch;
+        private long renderedVersion = -1;
         private int renderedHistory = -1;
+        private PublicMatchMessage clockState;
+        private double clockReceivedAt;
+        private string notification;
+        private float notificationUntil;
 
         private void Awake()
         {
@@ -37,7 +43,15 @@ namespace Waribasi.Presentation
             historyPanel.SetActive(false);
             historyButton.onClick.AddListener(() => ShowHistory(true));
             historyCloseButton.onClick.AddListener(() => ShowHistory(false));
+            //追加:通常リリースでは本数の開発表示を起動時から無効化する。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            fingersText.gameObject.SetActive(true);
+#else
+            fingersText.gameObject.SetActive(false);
+#endif
             interaction.Changed += Refresh;
+            //追加:失敗通知は常設説明と分離して購読する。
+            interaction.Notification += ShowNotification;
             Refresh();
         }
 
@@ -50,6 +64,8 @@ namespace Waribasi.Presentation
             if (interaction != null)
             {
                 interaction.Changed -= Refresh;
+                //追加:Scene離脱後に古い通知先を残さない。
+                interaction.Notification -= ShowNotification;
             }
         }
 
@@ -60,61 +76,57 @@ namespace Waribasi.Presentation
             interaction.SetHistoryOpen(visible);
         }
 
+        //変更:常設の操作説明・枚数・先後手を描かず、現在の状態と必要な結果を表示する。
         private void Refresh()
         {
             var view = interaction.ClientState;
-            if (view?.Public == null)
+            var state = view?.Public;
+            string npcLabel = MatchSessionAccess.IsLocal
+                ? NpcMatchEntry.DifficultyLabel(MatchSessionAccess.Local.Session.Setup.Difficulty) : null;
+            turnText.text = MatchHudDisplay.Turn(state, view?.LocalPlayer ?? -1, view?.CommunicationInterrupted ?? false, npcLabel);
+            if (clockState != state)
             {
-                turnText.text = "対戦準備中";
-                timerText.text = "";
-                cardCountsText.text = "手札：準備中";
+                clockState = state;
+                clockReceivedAt = Time.unscaledTimeAsDouble;
+            }
+            if (state == null || renderedMatch != state.matchId)
+            {
+                renderedMatch = state?.matchId;
+                renderedVersion = -1;
+                renderedHistory = -1;
+                notification = null;
+            }
+            //変更:本人札が古い場合も可否と半透明表示を再評価する。
+            CardButtonDraw.Instance?.DrawOwnHand(view?.OwnHand ?? System.Array.Empty<HandCard>());
+            DrawOpponentCards(MatchHudDisplay.OpponentCardCount(state, view?.LocalPlayer ?? -1));
+            if (state == null)
+            {
                 fingersText.text = "";
-                cardPhaseText.text = "";
-                messageText.text = "接続と盤面の準備を待っています";
+                UpdateTimer();
+                UpdateNotification();
                 return;
             }
-            var state = view.Public;
-            if (orderMatch != state.matchId)
-            {
-                orderMatch = state.matchId;
-                initialOrder = state.currentPlayer == view.LocalPlayer ? "自分が先手" : "相手が先手";
-                renderedHistory = -1;
-            }
-            turnText.text = initialOrder + " ／ " + (view.CommunicationInterrupted || state.matchPhase == (int)MatchPhase.Interrupted
-                ? "通信中断" : state.matchPhase == (int)MatchPhase.Finished ? (state.winner == view.LocalPlayer ? "勝利" : "敗北") :
-                state.matchPhase == (int)MatchPhase.Preparing ? "対戦準備中" : state.gate == (int)InputGate.Presenting ? "行動を反映中" :
-                state.currentPlayer == view.LocalPlayer ? "自分の手番" : "相手の手番");
-            //追加:最強のゲーム画面には難易度名だけを示す。
-            if (MatchSessionAccess.IsLocal)
-            {
-                turnText.text = NpcMatchEntry.DifficultyLabel(MatchSessionAccess.Local.Session.Setup.Difficulty) + " ／ " + turnText.text;
-            }
-            cardCountsText.text = $"自分の手札 { (view.LocalPlayer == 0 ? state.playerACardCount : state.playerBCardCount)}枚 ／ 相手 { (view.LocalPlayer == 0 ? state.playerBCardCount : state.playerACardCount)}枚";
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            //変更:本数の文字列も開発条件内だけで組み立てる。
             int me = view.LocalPlayer * 2;
             int opponent = (1 - view.LocalPlayer) * 2;
-            fingersText.text = $"自分　左 {MatchText.Count(state.hands[me].count)} ・ 右 {MatchText.Count(state.hands[me + 1].count)}\n相手　左 {MatchText.Count(state.hands[opponent].count)} ・ 右 {MatchText.Count(state.hands[opponent + 1].count)}";
-            //変更:NPCの手番はネットワーク応答待ちと区別する。
-            messageText.text = MatchSessionAccess.IsLocal && state.matchPhase == (int)MatchPhase.Active &&
-                state.currentPlayer != view.LocalPlayer ? "NPCが考えています" :
-                view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];
-            cardPhaseText.text = state.matchPhase == (int)MatchPhase.Active && state.currentPlayer == view.LocalPlayer
-                ? state.turnPhase == (int)TurnPhase.CardOrNormalAction ? "カード任意で1枚 → 攻撃か振り分け1回" : "カード使用済み → 攻撃か振り分け1回" : "公開履歴はいつでも確認できます";
-            //追加:カード結果の表示区間とスキップ表示を、NPC思考や通常説明より優先する。
-            string presentation = MatchText.Presentation(state, view.LocalPlayer);
-            if (presentation != null)
+            fingersText.text = $"自分 左 {MatchText.Count(state.hands[me].count)}・右 {MatchText.Count(state.hands[me + 1].count)}\n相手 左 {MatchText.Count(state.hands[opponent].count)}・右 {MatchText.Count(state.hands[opponent + 1].count)}";
+#endif
+            //追加:使用済みの公開イベントから札の結果を一度だけ通知する。
+            if (renderedVersion != state.stateVersion)
             {
-                messageText.text = presentation;
-            }
-            else if (view.CanAct && interaction.LegalActions.Any(action => action is SkipAction))
-            {
-                messageText.text = "片手が封印中です。カードを使うか「カードを使わない」を選択";
-                cardPhaseText.text = "カード判断後、通常行動をスキップします";
-            }
-            //変更:本人札の到着待ちでも旧表示を操作不能へ更新し、古い可否を残さない。
-            //削除:if (CardButtonDraw.Instance != null && view.HandIsCurrent)
-            if (CardButtonDraw.Instance != null)
-            {
-                CardButtonDraw.Instance.DrawOwnHand(view.OwnHand);
+                renderedVersion = state.stateVersion;
+                notification = null;
+                if (state.events != null)
+                {
+                    foreach (var item in state.events)
+                    {
+                        if (item.type == (int)RuleEventType.CardUsed && item.cardUse != null)
+                        {
+                            ShowNotification(MatchText.History(item.cardUse, view.LocalPlayer));
+                        }
+                    }
+                }
             }
             if (renderedHistory != view.History.Count)
             {
@@ -127,57 +139,196 @@ namespace Waribasi.Presentation
                 }
                 historyText.text = builder.Length > 0 ? builder.ToString() : "まだカードは使われていません";
             }
-            if (view.History.Count < state.historyCount)
-            {
-                historyButton.GetComponentInChildren<TMP_Text>(true).text = "履歴（取得中）";
-            }
-            else
-            {
-                historyButton.GetComponentInChildren<TMP_Text>(true).text = "公開履歴 " + view.History.Count;
-            }
+            historyButton.GetComponentInChildren<TMP_Text>(true).text = view.History.Count < state.historyCount
+                ? "履歴（取得中）" : "公開履歴 " + view.History.Count;
             UpdateTimer();
+            UpdateNotification();
+        }
+
+        //追加:裏札の表示には枚数以外の入力を渡さない。
+        private void DrawOpponentCards(int count)
+        {
+            if (opponentCardBacks == null)
+            {
+                return;
+            }
+            for (int index = 0; index < opponentCardBacks.Length; index++)
+            {
+                var card = opponentCardBacks[index];
+                if (card == null)
+                {
+                    continue;
+                }
+                card.SetActive(index < count);
+                if (index < count)
+                {
+                    ((RectTransform)card.transform).anchoredPosition = new Vector2((index - (count - 1) * 0.5f) * opponentCardSpacing, 0);
+                }
+            }
+        }
+
+        //追加:失敗と公開された札の結果を表示し、期限後には表示領域ごと隠す。
+        private void ShowNotification(string text)
+        {
+            notification = text;
+            notificationUntil = Time.unscaledTime + notificationSeconds;
+            UpdateNotification();
+        }
+
+        private void UpdateNotification()
+        {
+            var view = interaction.ClientState;
+            string text = MatchText.Presentation(view?.Public, view?.LocalPlayer ?? -1);
+            if (text == null && Time.unscaledTime < notificationUntil)
+            {
+                text = notification;
+            }
+            messageText.text = text ?? "";
+            messageText.gameObject.SetActive(!string.IsNullOrEmpty(text));
         }
 
         private void Update()
         {
             UpdateTimer();
+            //追加:通知は状態配信がなくても指定時間で消す。
+            UpdateNotification();
         }
 
+        //変更:同期時計を毎フレーム参照し、演出中・NPC・制限なしを区別する。
         private void UpdateTimer()
         {
             var view = interaction.ClientState;
             var state = view?.Public;
-            if (state == null)
+            bool visible = MatchHudDisplay.TimerVisible(state, MatchSessionAccess.IsLocal, view?.CommunicationInterrupted ?? false);
+            timerText.gameObject.SetActive(visible);
+            if (!visible)
             {
+                timerText.text = "";
                 return;
             }
-            timerText.color = new Color(0.12f, 0.18f, 0.23f);
-            if (state.matchPhase != (int)MatchPhase.Active || view.CommunicationInterrupted)
-            {
-                timerText.text = state.turnSeconds == 0 ? "制限なし" : $"毎手番 {state.turnSeconds}秒";
-            }
-            else if (state.gate == (int)InputGate.Presenting)
-            {
-                timerText.text = "演出後に次の手番を開始";
-            }
-            else if (!state.hasDeadline)
-            {
-                timerText.text = "制限なし";
-            }
-            else
-            {
-                double now = NetworkManager.Singleton != null ? NetworkManager.Singleton.ServerTime.Time : state.serverTime;
-                int seconds = MatchText.RemainingSeconds(state.deadline, now);
-                timerText.text = seconds == 0 ? "残り 0秒（ホスト判定待ち）" : $"残り {seconds}秒";
-                if (state.deadline - now <= 10)
-                {
-                    timerText.color = urgentColor;
-                    timerText.text = "! " + timerText.text;
-                }
-            }
+            var manager = NetworkManager.Singleton;
+            double now = manager != null && manager.IsListening ? manager.ServerTime.Time :
+                MatchHudDisplay.EstimatedServerTime(state.serverTime, clockReceivedAt, Time.unscaledTimeAsDouble);
+            timerText.text = MatchHudDisplay.Timer(state, now);
+            timerText.color = MatchHudDisplay.TimerUrgent(state, now) ? urgentColor : new Color(0.12f, 0.18f, 0.23f);
         }
     }
 }
 
-//削除:T06の共通入力・ローカル接続へ移行する前の箇所を参照用に保存する。
-//            messageText.text = view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];
+//削除:T12で撤去した常設説明・先後手の繰返しと旧時計を参照用に残す。
+//        [SerializeField] private TMP_Text cardCountsText;
+//        [SerializeField] private TMP_Text cardPhaseText;
+//        private string initialOrder;
+//        private string orderMatch;
+//        private void Refresh()
+//        {
+//            var view = interaction.ClientState;
+//            if (view?.Public == null)
+//            {
+//                turnText.text = "対戦準備中";
+//                timerText.text = "";
+//                cardCountsText.text = "手札：準備中";
+//                fingersText.text = "";
+//                cardPhaseText.text = "";
+//                messageText.text = "接続と盤面の準備を待っています";
+//                return;
+//            }
+//            var state = view.Public;
+//            if (orderMatch != state.matchId)
+//            {
+//                orderMatch = state.matchId;
+//                initialOrder = state.currentPlayer == view.LocalPlayer ? "自分が先手" : "相手が先手";
+//                renderedHistory = -1;
+//            }
+//            turnText.text = initialOrder + " ／ " + (view.CommunicationInterrupted || state.matchPhase == (int)MatchPhase.Interrupted
+//                ? "通信中断" : state.matchPhase == (int)MatchPhase.Finished ? (state.winner == view.LocalPlayer ? "勝利" : "敗北") :
+//                state.matchPhase == (int)MatchPhase.Preparing ? "対戦準備中" : state.gate == (int)InputGate.Presenting ? "行動を反映中" :
+//                state.currentPlayer == view.LocalPlayer ? "自分の手番" : "相手の手番");
+//            //追加:最強のゲーム画面には難易度名だけを示す。
+//            if (MatchSessionAccess.IsLocal)
+//            {
+//                turnText.text = NpcMatchEntry.DifficultyLabel(MatchSessionAccess.Local.Session.Setup.Difficulty) + " ／ " + turnText.text;
+//            }
+//            cardCountsText.text = $"自分の手札 { (view.LocalPlayer == 0 ? state.playerACardCount : state.playerBCardCount)}枚 ／ 相手 { (view.LocalPlayer == 0 ? state.playerBCardCount : state.playerACardCount)}枚";
+//            int me = view.LocalPlayer * 2;
+//            int opponent = (1 - view.LocalPlayer) * 2;
+//            fingersText.text = $"自分　左 {MatchText.Count(state.hands[me].count)} ・ 右 {MatchText.Count(state.hands[me + 1].count)}\n相手　左 {MatchText.Count(state.hands[opponent].count)} ・ 右 {MatchText.Count(state.hands[opponent + 1].count)}";
+//            //変更:NPCの手番はネットワーク応答待ちと区別する。
+//            messageText.text = MatchSessionAccess.IsLocal && state.matchPhase == (int)MatchPhase.Active &&
+//                state.currentPlayer != view.LocalPlayer ? "NPCが考えています" :
+//                view.HasPendingRequest ? "操作の応答を待っています" : interaction.Message.Split('\n')[0];
+//            cardPhaseText.text = state.matchPhase == (int)MatchPhase.Active && state.currentPlayer == view.LocalPlayer
+//                ? state.turnPhase == (int)TurnPhase.CardOrNormalAction ? "カード任意で1枚 → 攻撃か振り分け1回" : "カード使用済み → 攻撃か振り分け1回" : "公開履歴はいつでも確認できます";
+//            //追加:カード結果の表示区間とスキップ表示を、NPC思考や通常説明より優先する。
+//            string presentation = MatchText.Presentation(state, view.LocalPlayer);
+//            if (presentation != null)
+//            {
+//                messageText.text = presentation;
+//            }
+//            else if (view.CanAct && interaction.LegalActions.Any(action => action is SkipAction))
+//            {
+//                messageText.text = "片手が封印中です。カードを使うか「カードを使わない」を選択";
+//                cardPhaseText.text = "カード判断後、通常行動をスキップします";
+//            }
+//            //変更:本人札の到着待ちでも旧表示を操作不能へ更新し、古い可否を残さない。
+//            //削除:if (CardButtonDraw.Instance != null && view.HandIsCurrent)
+//            if (CardButtonDraw.Instance != null)
+//            {
+//                CardButtonDraw.Instance.DrawOwnHand(view.OwnHand);
+//            }
+//            if (renderedHistory != view.History.Count)
+//            {
+//                renderedHistory = view.History.Count;
+//                var builder = new StringBuilder();
+//                foreach (var record in view.History)
+//                {
+//                    builder.AppendLine(MatchText.History(record, view.LocalPlayer));
+//                    builder.AppendLine();
+//                }
+//                historyText.text = builder.Length > 0 ? builder.ToString() : "まだカードは使われていません";
+//            }
+//            if (view.History.Count < state.historyCount)
+//            {
+//                historyButton.GetComponentInChildren<TMP_Text>(true).text = "履歴（取得中）";
+//            }
+//            else
+//            {
+//                historyButton.GetComponentInChildren<TMP_Text>(true).text = "公開履歴 " + view.History.Count;
+//            }
+//            UpdateTimer();
+//        }
+//
+//
+//        private void UpdateTimer()
+//        {
+//            var view = interaction.ClientState;
+//            var state = view?.Public;
+//            if (state == null)
+//            {
+//                return;
+//            }
+//            timerText.color = new Color(0.12f, 0.18f, 0.23f);
+//            if (state.matchPhase != (int)MatchPhase.Active || view.CommunicationInterrupted)
+//            {
+//                timerText.text = state.turnSeconds == 0 ? "制限なし" : $"毎手番 {state.turnSeconds}秒";
+//            }
+//            else if (state.gate == (int)InputGate.Presenting)
+//            {
+//                timerText.text = "演出後に次の手番を開始";
+//            }
+//            else if (!state.hasDeadline)
+//            {
+//                timerText.text = "制限なし";
+//            }
+//            else
+//            {
+//                double now = NetworkManager.Singleton != null ? NetworkManager.Singleton.ServerTime.Time : state.serverTime;
+//                int seconds = MatchText.RemainingSeconds(state.deadline, now);
+//                timerText.text = seconds == 0 ? "残り 0秒（ホスト判定待ち）" : $"残り {seconds}秒";
+//                if (state.deadline - now <= 10)
+//                {
+//                    timerText.color = urgentColor;
+//                    timerText.text = "! " + timerText.text;
+//                }
+//            }
+//        }

@@ -59,6 +59,8 @@ namespace Waribasi.Presentation
         public IReadOnlyList<GameAction> LegalActions => legalActions;
         public string Message => message;
         public event Action Changed;
+        //追加:操作失敗だけを短いHUD通知へ渡し、常設説明を要求しない。
+        public event Action<string> Notification;
 
         private void Awake()
         {
@@ -367,6 +369,11 @@ namespace Waribasi.Presentation
         {
             ClearSelection();
             message = sent ? "要求を送信しました" : "送信できませんでした。現在の状態を確認してください";
+            //追加:送信失敗は選択UIを閉じた後も通知する。
+            if (!sent)
+            {
+                Notification?.Invoke(message);
+            }
             PublishSelection();
         }
 
@@ -405,6 +412,8 @@ namespace Waribasi.Presentation
         private void ShowMessage(string value)
         {
             message = value;
+            //追加:無効な対象などの必要な通知だけを表示する。
+            Notification?.Invoke(value);
             PublishSelection();
         }
 
@@ -414,6 +423,8 @@ namespace Waribasi.Presentation
             {
                 ClearSelection();
                 message = MatchText.Rejection(response);
+                //追加:正式な拒否理由を常設説明の撤去後も残す。
+                Notification?.Invoke(message);
             }
             PublishSelection();
         }

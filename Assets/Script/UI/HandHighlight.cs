@@ -29,6 +29,12 @@ public class HandHighlight : MonoBehaviour
     private MatchInteractionController interaction;
     private Camera localCamera;
     private bool legacySelection;
+    //追加:公開イベントの変化対象を短時間強調し、選択解除後も結果を確認できるようにする。
+    [SerializeField, Min(0.1f)] private float resultHighlightSeconds = 0.8f;
+    private string resultMatch;
+    private long resultVersion = -1;
+    private float resultUntil;
+    private bool resultVisible;
 
     private void Awake()
     {
@@ -73,6 +79,11 @@ public class HandHighlight : MonoBehaviour
             interaction.Changed += Apply;
             Apply();
         }
+        //追加:状態通知のない間も結果の強調を期限で終了する。
+        if (resultVisible && Time.unscaledTime >= resultUntil)
+        {
+            Apply();
+        }
         if (localCamera == null)
         {
             localCamera = Camera.main;
@@ -107,6 +118,8 @@ public class HandHighlight : MonoBehaviour
         {
             return;
         }
+        //変更:選択と確定済み結果を同じ既存マーカーで示す。
+        //削除:bool selected = interaction != null ? interaction.IsMatchHandSelected(hand) : legacySelection;
         bool selected = interaction != null ? interaction.IsMatchHandSelected(hand) : legacySelection;
         bool defended = false;
         bool sealedHand = false;
@@ -114,13 +127,25 @@ public class HandHighlight : MonoBehaviour
         //変更:公開盤面の席と左右を使い、相手の非公開情報を参照しない。
         if (view?.Public != null && hand != null && hand.ResolvePlayer(view, out var player))
         {
+            //追加:同じ公開版の再配信で強調時間を延長しない。
+            if (resultMatch != view.Public.matchId || resultVersion != view.Public.stateVersion)
+            {
+                resultMatch = view.Public.matchId;
+                resultVersion = view.Public.stateVersion;
+                resultUntil = MatchHudDisplay.ChangedHand(view.Public, player, hand.Side)
+                    ? Time.unscaledTime + resultHighlightSeconds : 0;
+            }
             int index = (int)player * 2 + (int)hand.Side;
             var state = view.Public.hands[index];
             alive = state.count != 0;
             defended = state.defenseUntil != 0;
             sealedHand = state.sealUntil != 0;
         }
-        selected &= alive;
+        //追加:切断や終了では古い結果を点灯し続けない。
+        resultVisible = view?.Public != null && !view.CommunicationInterrupted &&
+            view.Public.matchPhase == (int)Waribasi.Rules.MatchPhase.Active && Time.unscaledTime < resultUntil;
+        selected = (selected || resultVisible) && alive;
+        //削除:selected &= alive;
         if (selectionMarker != null)
         {
             selectionMarker.SetActive(selected);

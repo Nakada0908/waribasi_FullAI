@@ -272,9 +272,14 @@ namespace Waribasi.Presentation
             bool active = IsActiveMatch();
             if (preparationText != null)
             {
+                //変更:先後手は開始時の主表示に集約し、同じ準備経路で再戦にも表示する。
+                //削除:string order = state == null ? (local ? "盤面を準備しています" : "通信と盤面を準備しています") :
+                //    (state.currentPlayer == view.LocalPlayer ? "自分が先手 ／ 相手が後手" : "相手が先手 ／ 自分が後手");
                 string order = state == null ? (local ? "盤面を準備しています" : "通信と盤面を準備しています") :
-                    (state.currentPlayer == view.LocalPlayer ? "自分が先手 ／ 相手が後手" : "相手が先手 ／ 自分が後手");
-                preparationText.text = order + "\n" + (state == null ? "" : "毎手番：" + MatchSetupPresenter.TimeLabel(state.turnSeconds)) +
+                    "<size=180%><b>" + MatchHudDisplay.InitialOrder(state, view.LocalPlayer) + "</b></size>";
+                //変更:NPC戦の開始表示から操作時計の行も除く。
+                //削除:preparationText.text = order + "\n" + (state == null ? "" : "毎手番：" + MatchSetupPresenter.TimeLabel(state.turnSeconds)) +
+                preparationText.text = order + "\n" + (state == null || local ? "" : "毎手番：" + MatchSetupPresenter.TimeLabel(state.turnSeconds)) +
                     "\n" + (state != null && state.initialCardsDealt ? (local ? "初期手札を配りました。対戦を開始します" : "初期手札を配りました。双方の準備を待っています") : (local ? "これから初期手札を配ります" : "双方の準備完了後に手札を配ります"));
                 //変更:NPC準備中の取消も有効にする。
                 preparationCancel.interactable = local || (session != null && !session.IsWorking);
