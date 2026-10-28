@@ -16,9 +16,15 @@ public class CardButtonDraw : MonoBehaviour
     [SerializeField] private float spacing = 286;
     [SerializeField] private float selectedHeight = 45;
 
+    //追加:札の背景と文字をまとめて半透明にする。
+    [SerializeField, Range(0.1f, 0.9f)] private float unavailableAlpha = 0.45f;
+    private CanvasGroup[] cardGroups;
+
     private void Awake()
     {
         Instance = this;
+        //追加:初期配布を受け取るまではカードを表示しない。
+        DrawOwnHand(System.Array.Empty<HandCard>());
     }
 
     private void OnDestroy()
@@ -31,6 +37,23 @@ public class CardButtonDraw : MonoBehaviour
 
     public void DrawOwnHand(IReadOnlyList<HandCard> cards)
     {
+        //追加:表示グループは初回だけ用意し、状態更新ごとの検索を避ける。
+        if (buttons == null)
+        {
+            return;
+        }
+        if (cardGroups == null || cardGroups.Length != buttons.Length)
+        {
+            cardGroups = new CanvasGroup[buttons.Length];
+            for (int index = 0; index < buttons.Length; index++)
+            {
+                cardGroups[index] = buttons[index].GetComponent<CanvasGroup>() ?? buttons[index].gameObject.AddComponent<CanvasGroup>();
+                //追加:Button側の半透明と重ねず、札全体の透明度をCanvasGroupで揃える。
+                var colors = buttons[index].colors;
+                colors.disabledColor = colors.normalColor;
+                buttons[index].colors = colors;
+            }
+        }
         var interaction = MatchInteractionController.Instance;
         for (int i = 0; i < buttons.Length; i++)
         {
@@ -44,8 +67,14 @@ public class CardButtonDraw : MonoBehaviour
             bool selected = interaction?.SelectedCard?.Id == cards[i].Id;
             ((RectTransform)buttons[i].transform).anchoredPosition = new Vector2(
                 (i - (cards.Count - 1) * 0.5f) * spacing, selected ? selectedHeight : 0);
-            buttons[i].interactable = interaction != null && interaction.CanInteract && card.Kind != CardKind.Revival;
-            var label = buttons[i].GetComponentInChildren<TMP_Text>();
+            //変更:共通の合法候補と受付状態から操作可否を決め、使えない札全体を薄くする。
+            //削除:buttons[i].interactable = interaction != null && interaction.CanInteract && card.Kind != CardKind.Revival;
+            bool usable = interaction != null && interaction.CanUseCard(cards[i].Id);
+            buttons[i].interactable = usable;
+            cardGroups[i].alpha = usable ? 1 : unavailableAlpha;
+            cardGroups[i].interactable = usable;
+            //変更:初期表示や非表示の親からの更新でもラベルを取得する。
+            var label = buttons[i].GetComponentInChildren<TMP_Text>(true);
             label.text = MatchText.Card(card);
             buttons[i].image.sprite = NumberSprite(card);
             buttons[i].image.color = card.IsNumber ? Color.white : card.Kind == CardKind.Revival

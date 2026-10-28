@@ -31,9 +31,9 @@ namespace Waribasi.Presentation
         [SerializeField] private Button attackCancelButton;
         [SerializeField] private Button redistributeButton;
         [SerializeField] private Button swapButton;
-        //追加:スキップ条件中は交換できないため、既存ボタンを判断用に切り替える。
+        //変更:既存の交換ボタンは、条件付きスキップの判断専用にする。
         private TMP_Text swapText;
-        private string swapLabel;
+        //削除:private string swapLabel;
         private MatchClientState view;
         private RuleActionQuery query;
         private IReadOnlyList<GameAction> legalActions = Array.Empty<GameAction>();
@@ -72,11 +72,14 @@ namespace Waribasi.Presentation
             cancelButton.onClick.AddListener(CancelSelection);
             attackCancelButton.onClick.AddListener(CancelSelection);
             redistributeButton.onClick.AddListener(OpenRedistribution);
-            //変更:Sceneを変更せず、封印で詰まったときだけカード辞退操作にする。
+            //変更:配分と交換は同じ入口にまとめ、既存Sceneの参照を利用する。
+            redistributeButton.GetComponentInChildren<TMP_Text>(true).text = "手を変更";
+            //変更:封印で行動できないときだけカード辞退操作を表示する。
             //削除:swapButton.onClick.AddListener(SelectSwap);
             swapText = swapButton.GetComponentInChildren<TMP_Text>(true);
-            swapLabel = swapText != null ? swapText.text : "左右交換";
-            swapButton.onClick.AddListener(SelectSwapOrSkip);
+            //削除:swapLabel = swapText != null ? swapText.text : "左右交換";
+            //削除:swapButton.onClick.AddListener(SelectSwapOrSkip);
+            swapButton.onClick.AddListener(SkipWithoutCard);
             RefreshControls();
         }
 
@@ -122,7 +125,9 @@ namespace Waribasi.Presentation
         {
             query = CreateQuery(view);
             legalActions = query != null ? query.GetLegalActions((PlayerId)view.LocalPlayer) : Array.Empty<GameAction>();
-            if (HasSelection && (!CanInteract || view.Public.matchId != selectedMatch || view.Public.stateVersion != selectedVersion))
+            //変更:同じ版の本人札が更新された場合も、無効になった選択を破棄する。
+            if (HasSelection && (!CanInteract || view.Public.matchId != selectedMatch || view.Public.stateVersion != selectedVersion ||
+                (SelectedCard != null && !CanUseCard(SelectedCard.Id)) || (selectedAction != null && !IsLegal(selectedAction))))
             {
                 ClearSelection();
             }
@@ -153,6 +158,12 @@ namespace Waribasi.Presentation
         {
             return CanInteract && query != null &&
                 query.Validate((PlayerId)view.LocalPlayer, action, view.Public.stateVersion) == ActionRejection.None;
+        }
+
+        //追加:見た目と直接呼出しのどちらも、共通ルールが返す本人札の合法候補で判定する。
+        public bool CanUseCard(long cardId)
+        {
+            return CanInteract && legalActions.OfType<UseCardAction>().Any(action => action.CardId == cardId);
         }
 
         private void BeginSelection(MatchSelectionMode mode)
@@ -229,33 +240,36 @@ namespace Waribasi.Presentation
                 return;
             }
             var card = view.OwnHand[index];
+            //追加:使用済み・自動復活・合法な対象のない札は選択自体を受け付けない。
+            if (!CanUseCard(card.Id))
+            {
+                return;
+            }
             if (SelectedCard != null && SelectedCard.Id == card.Id)
             {
                 CancelSelection();
                 return;
             }
-            if (card.Definition.Kind == CardKind.Revival)
-            {
-                ShowMessage("復活カードは敗北直前に自動発動します");
-                return;
-            }
+            //削除:復活札を選択してから通知する分岐は、上の共通候補判定へ統合。
             BeginSelection(MatchSelectionMode.Card);
             SelectedCard = card;
             options.AddRange(legalActions.OfType<UseCardAction>().Where(a => a.CardId == card.Id));
-            message = MatchText.Card(card.Definition) + "\n" +
-                (options.Count == 0 ? "現在は使用できません。取消して別の操作を選べます" :
-                card.Definition.NeedsHand ? "対象本人の左右を選択してください" :
-                card.Definition.IsBoth ? "対象本人の左・右への割り当てを選択してください" : "確定で使用します");
-            if (card.Definition.IsDraw && options.Count == 1)
+            //変更:合法な候補が1つなら対象・割当てを選び直さず、確認と取消だけにする。
+            //削除:if (card.Definition.IsDraw && options.Count == 1)
+            if (options.Count == 1)
             {
-                selectedAction = options[0];
+                ChooseAction(options[0]);
+                return;
             }
+            message = MatchText.Card(card.Definition) + "\n" +
+                (card.Definition.NeedsHand ? "対象本人の左右を選択してください" : "対象本人の左・右への割り当てを選択してください");
             PublishSelection();
         }
 
         public void OpenRedistribution()
         {
-            if (!CanInteract)
+            //変更:合法な手の変更がある場合だけ開き、配分と交換を同じ候補一覧に表示する。
+            if (!CanInteract || !legalActions.OfType<RedistributeAction>().Any())
             {
                 return;
             }
@@ -266,7 +280,8 @@ namespace Waribasi.Presentation
             }
             BeginSelection(MatchSelectionMode.Redistribution);
             options.AddRange(legalActions.OfType<RedistributeAction>());
-            message = "左右の配分を選択してください（合体・復活・交換も手番を消費）";
+            //変更:入口の名称に合わせ、合体・復活・交換も同じ手の変更として案内する。
+            message = "手の変更を選択してください（配分・合体・復活・交換で手番を消費）";
             PublishSelection();
         }
 
@@ -289,8 +304,14 @@ namespace Waribasi.Presentation
             ChooseAction(swap);
         }
 
-        //追加:カードを使わない判断も、共有の合法性照会と送信経路へ通す。
+        //変更:旧呼出しとの互換口もスキップ専用にし、交換の別入口にしない。
         public void SelectSwapOrSkip()
+        {
+            SkipWithoutCard();
+        }
+
+        //追加:カード辞退は手の変更と別に残し、共有の合法性照会と送信経路へ通す。
+        public void SkipWithoutCard()
         {
             var skip = new SkipAction();
             if (IsLegal(skip))
@@ -298,7 +319,7 @@ namespace Waribasi.Presentation
                 AfterSend(MatchSessionAccess.Send(skip, view.Public.stateVersion));
                 return;
             }
-            SelectSwap();
+            //削除:SelectSwap();
         }
 
         public void SelectOption(int index)
@@ -324,7 +345,8 @@ namespace Waribasi.Presentation
                 return;
             }
             selectedAction = action;
-            message = (SelectedCard != null ? MatchText.Card(SelectedCard.Definition) + "\n" : "振り分け：") +
+            //変更:確認内容も統一した入口名に揃える。
+            message = (SelectedCard != null ? MatchText.Card(SelectedCard.Definition) + "\n" : "手の変更：") +
                 MatchText.Option(action, SelectedCard?.Definition) + "\n確定前は取消できます";
             PublishSelection();
         }
@@ -413,7 +435,8 @@ namespace Waribasi.Presentation
             selectionText.text = message;
             for (int i = 0; i < optionButtons.Length; i++)
             {
-                bool visible = i < options.Count;
+                //変更:カード候補が1つのときは確定済みの対象を文面に示し、選択ボタンを省く。
+                bool visible = i < options.Count && !(Mode == MatchSelectionMode.Card && options.Count == 1);
                 optionButtons[i].gameObject.SetActive(visible);
                 optionButtons[i].interactable = visible && CanInteract;
                 if (visible)
@@ -424,21 +447,13 @@ namespace Waribasi.Presentation
             confirmButton.interactable = CanInteract && selectedAction != null;
             cancelButton.interactable = HasSelection;
             redistributeButton.interactable = CanInteract && legalActions.OfType<RedistributeAction>().Any();
-            if (view?.Public != null)
+            //変更:交換は手の変更一覧へ統合したため、旧ボタンはスキップ判断中だけ表示する。
+            bool canSkip = legalActions.Any(action => action is SkipAction);
+            swapButton.gameObject.SetActive(canSkip && !HistoryOpen && !ModalBlocked);
+            swapButton.interactable = CanInteract && canSkip;
+            if (swapText != null)
             {
-                int offset = view.LocalPlayer * 2;
-                //変更:片手封印中に札を使う判断を残し、辞退時だけ手番を終える。
-                //削除:swapButton.interactable = IsLegal(new RedistributeAction(view.Public.hands[offset + 1].count, view.Public.hands[offset].count));
-                bool canSkip = legalActions.Any(action => action is SkipAction);
-                swapButton.interactable = CanInteract && (canSkip || IsLegal(new RedistributeAction(view.Public.hands[offset + 1].count, view.Public.hands[offset].count)));
-                if (swapText != null)
-                {
-                    swapText.text = canSkip ? "カードを使わない" : swapLabel;
-                }
-            }
-            else
-            {
-                swapButton.interactable = false;
+                swapText.text = "カードを使わない";
             }
         }
 
@@ -503,3 +518,28 @@ namespace Waribasi.Presentation
 //bool own = hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
 //(!card.Target.HasValue || card.Target == MatchClientState.ToSide(hand.GetComponent<HandRL>().handType));
 //return Mode == MatchSelectionMode.Redistribution && hand.OwnerClientId == NetworkManager.Singleton.LocalClientId;
+
+//削除:T11で共通候補判定とスキップ専用表示へ置き換えた旧処理を参照用に残す。
+//if (card.Definition.Kind == CardKind.Revival)
+//{
+//    ShowMessage("復活カードは敗北直前に自動発動します");
+//    return;
+//}
+//message = MatchText.Card(card.Definition) + "\n" +
+//    (options.Count == 0 ? "現在は使用できません。取消して別の操作を選べます" :
+//    card.Definition.NeedsHand ? "対象本人の左右を選択してください" :
+//    card.Definition.IsBoth ? "対象本人の左・右への割り当てを選択してください" : "確定で使用します");
+//if (view?.Public != null)
+//{
+//    int offset = view.LocalPlayer * 2;
+//    bool canSkip = legalActions.Any(action => action is SkipAction);
+//    swapButton.interactable = CanInteract && (canSkip || IsLegal(new RedistributeAction(view.Public.hands[offset + 1].count, view.Public.hands[offset].count)));
+//    if (swapText != null)
+//    {
+//        swapText.text = canSkip ? "カードを使わない" : swapLabel;
+//    }
+//}
+//else
+//{
+//    swapButton.interactable = false;
+//}

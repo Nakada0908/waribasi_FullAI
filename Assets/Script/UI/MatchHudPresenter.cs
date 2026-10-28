@@ -110,7 +110,9 @@ namespace Waribasi.Presentation
                 messageText.text = "片手が封印中です。カードを使うか「カードを使わない」を選択";
                 cardPhaseText.text = "カード判断後、通常行動をスキップします";
             }
-            if (CardButtonDraw.Instance != null && view.HandIsCurrent)
+            //変更:本人札の到着待ちでも旧表示を操作不能へ更新し、古い可否を残さない。
+            //削除:if (CardButtonDraw.Instance != null && view.HandIsCurrent)
+            if (CardButtonDraw.Instance != null)
             {
                 CardButtonDraw.Instance.DrawOwnHand(view.OwnHand);
             }
