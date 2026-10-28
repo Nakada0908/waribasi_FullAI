@@ -86,12 +86,16 @@ namespace Waribasi.Presentation.Tests
             if (!ReferenceEquals(hud.GetType().GetProperty("Instance").GetValue(null), hud))
             {
                 Call(hud, "Awake");
+                //追加:代替環境でも有効化時の購読を再現する。
+                Call(hud, "OnEnable");
             }
         }
 
         [TearDown]
         public void TearDown()
         {
+            //追加:代替環境でもCanvasと入力通知の購読を先に解除する。
+            Call(hud, "OnDisable");
             Call(hud, "OnDestroy");
             Call(interaction, "Bind", (object)null);
             Call(interaction, "OnDestroy");
@@ -250,6 +254,39 @@ namespace Waribasi.Presentation.Tests
             {
                 changedEvent.RemoveEventHandler(view, changed);
             }
+        }
+
+        //追加:Scene破棄中に履歴UIが先に失われても、入力遮断解除でHUDを更新しない。
+        [TestCase("historyButton")]
+        [TestCase("historyText")]
+        [TestCase("messageText")]
+        public void MissingHudChildCannotBeAccessedByModalRelease(string field)
+        {
+            Set(hud, field, null);
+            Assert.DoesNotThrow(() => Call(interaction, "SetModalBlocked", false));
+        }
+
+        //追加:無効化で通知を切り、再有効化を繰り返しても購読を一つだけ戻す。
+        [Test]
+        public void DisabledHudUnsubscribesAndReenabledHudSubscribesOnce()
+        {
+            Call(hud, "OnDisable");
+            foreach (string name in new[] { "Changed", "Notification" })
+            {
+                var handler = (Delegate)interaction.GetType().GetField(name,
+                    BindingFlags.Instance | BindingFlags.NonPublic).GetValue(interaction);
+                Assert.That(handler == null || handler.GetInvocationList().All(item => !ReferenceEquals(item.Target, hud)), Is.True);
+            }
+            Call(hud, "OnEnable");
+            Call(hud, "OnEnable");
+            foreach (string name in new[] { "Changed", "Notification" })
+            {
+                var handler = (Delegate)interaction.GetType().GetField(name,
+                    BindingFlags.Instance | BindingFlags.NonPublic).GetValue(interaction);
+                Assert.That(handler.GetInvocationList().Count(item => ReferenceEquals(item.Target, hud)), Is.EqualTo(1));
+            }
+            Call(interaction, "OnResponse", new RequestResponseMessage { accepted = false, ruleRejection = (int)ActionRejection.CardUnchanged });
+            Assert.That(message.text, Does.Contain("カード未消費"));
         }
 
         [Test]

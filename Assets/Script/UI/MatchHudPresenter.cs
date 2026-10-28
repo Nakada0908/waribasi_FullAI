@@ -56,10 +56,11 @@ namespace Waribasi.Presentation
 #else
             fingersText.gameObject.SetActive(false);
 #endif
-            interaction.Changed += Refresh;
+            //変更:通知の購読はOnEnableへ移し、無効化時に解除する。
+            //削除:interaction.Changed += Refresh;
             //追加:失敗通知は常設説明と分離して購読する。
-            interaction.Notification += ShowNotification;
-            Refresh();
+            //削除:interaction.Notification += ShowNotification;
+            //削除:Refresh();
         }
 
         //追加:Canvasの描画段階で結果表示を確認し、計算前の配信だけを起点にしない。
@@ -67,9 +68,15 @@ namespace Waribasi.Presentation
         {
             //追加:Sceneロード中に生成されても可読時間を先に開始しない。
             SetTransitionObscured(PresentationVisibility.Obscured);
+            //追加:再有効化時に購読を戻し、同じ通知の重複登録を防ぐ。
+            Canvas.willRenderCanvases -= ObserveReadableDisplay;
             Canvas.willRenderCanvases += ObserveReadableDisplay;
             if (interaction != null)
             {
+                interaction.Changed -= Refresh;
+                interaction.Notification -= ShowNotification;
+                interaction.Changed += Refresh;
+                interaction.Notification += ShowNotification;
                 Refresh();
             }
         }
@@ -77,6 +84,12 @@ namespace Waribasi.Presentation
         private void OnDisable()
         {
             Canvas.willRenderCanvases -= ObserveReadableDisplay;
+            //追加:履歴や入力遮断の解除が通知を発火する前に購読を切る。
+            if (interaction != null)
+            {
+                interaction.Changed -= Refresh;
+                interaction.Notification -= ShowNotification;
+            }
             MatchSessionAccess.Local?.ObserveCardResultDisplay(interaction?.ClientState?.Public, false);
             notification = null;
             notificationUntil = -1;
@@ -188,6 +201,11 @@ namespace Waribasi.Presentation
 
         public void ShowHistory(bool visible)
         {
+            //追加:子UIが先に破棄されるScene終了中は表示を再開しない。
+            if (!HasLiveView)
+            {
+                return;
+            }
             //追加:履歴・メニューへ隠れる前に待機起点を無効化する。
             InvalidateReadableDisplay();
             //変更:閉じ終わるまでは履歴の遮断を維持する。通常の正式時計は止めない。
@@ -205,7 +223,9 @@ namespace Waribasi.Presentation
             }
             PanelFade.For(historyPanel).SetVisible(visible, () =>
             {
-                if (this != null && interaction != null && historyPanel != null && !historyPanel.activeSelf)
+                //変更:閉じるフェードの完了前に履歴ボタンが破棄された場合も更新しない。
+                //削除:if (this != null && interaction != null && historyPanel != null && !historyPanel.activeSelf)
+                if (HasLiveView && historyPanel != null && !historyPanel.activeSelf)
                 {
                     historyButton.gameObject.SetActive(true);
                     interaction.SetHistoryOpen(false);
@@ -213,11 +233,18 @@ namespace Waribasi.Presentation
             });
         }
 
+        //追加:HUD本体より先に子UIが破棄される順序でも、Unityの生存判定で更新を止める。
+        private bool HasLiveView => this != null && isActiveAndEnabled && interaction != null &&
+            turnText != null && timerText != null && fingersText != null && messageText != null &&
+            historyText != null && historyButton != null;
+
         //変更:常設の操作説明・枚数・先後手を描かず、現在の状態と必要な結果を表示する。
         private void Refresh()
         {
             //追加:無効化中の購読通知で古い表示を再生成しない。
-            if (!isActiveAndEnabled)
+            //変更:HUDが有効でも、子UIが破棄済みなら参照しない。
+            //削除:if (!isActiveAndEnabled)
+            if (!HasLiveView)
             {
                 return;
             }
@@ -299,8 +326,15 @@ namespace Waribasi.Presentation
                 }
                 historyText.text = builder.Length > 0 ? builder.ToString() : "まだカードは使われていません";
             }
-            historyButton.GetComponentInChildren<TMP_Text>(true).text = view.History.Count < state.historyCount
-                ? "履歴（取得中）" : "公開履歴 " + view.History.Count;
+            //変更:ボタンより先にラベルが破棄された場合も安全に終了する。
+            //削除:historyButton.GetComponentInChildren<TMP_Text>(true).text = view.History.Count < state.historyCount
+            //削除:    ? "履歴（取得中）" : "公開履歴 " + view.History.Count;
+            var historyLabel = historyButton.GetComponentInChildren<TMP_Text>(true);
+            if (historyLabel != null)
+            {
+                historyLabel.text = view.History.Count < state.historyCount
+                    ? "履歴（取得中）" : "公開履歴 " + view.History.Count;
+            }
             UpdateTimer();
             UpdateNotification();
         }
@@ -331,7 +365,9 @@ namespace Waribasi.Presentation
         private void ShowNotification(string text)
         {
             //変更:結果待ち中の失敗通知はカード本文に添え、結果を上書きしない。
-            if (!isActiveAndEnabled)
+            //変更:通知でも破棄済みUIへアクセスしない。
+            //削除:if (!isActiveAndEnabled)
+            if (!HasLiveView)
             {
                 return;
             }
@@ -388,6 +424,11 @@ namespace Waribasi.Presentation
 
         private void Update()
         {
+            //追加:子UIが先に破棄されたフレームでは通常更新も止める。
+            if (!HasLiveView)
+            {
+                return;
+            }
             //追加:履歴パネルの外部無効化でも閉じる操作と同じ入力状態へ戻す。
             if (historyPanel != null && !historyPanel.activeSelf && interaction != null && interaction.HistoryOpen)
             {
