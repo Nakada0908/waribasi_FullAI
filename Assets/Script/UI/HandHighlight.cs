@@ -30,9 +30,13 @@ public class HandHighlight : MonoBehaviour
     private Camera localCamera;
     private bool legacySelection;
     //追加:公開イベントの変化対象を短時間強調し、選択解除後も結果を確認できるようにする。
-    [SerializeField, Min(0.1f)] private float resultHighlightSeconds = 0.8f;
+    //変更:カード結果の基本強調を1.5秒へ延長する。
+    //削除:[SerializeField, Min(0.1f)] private float resultHighlightSeconds = 0.8f;
+    [SerializeField, Min(0.1f)] private float resultHighlightSeconds = 1.5f;
     private string resultMatch;
     private long resultVersion = -1;
+    //追加:現在のカードが変更した手だけをNPC結果待ちへ結び付ける。
+    private long highlightedVersion = -1;
     private float resultUntil;
     private bool resultVisible;
 
@@ -114,7 +118,8 @@ public class HandHighlight : MonoBehaviour
 
     private void Apply()
     {
-        if (myRenderer == null || originalMaterials == null)
+        //追加:無効化中のイベントでマーカーを再表示しない。
+        if (!isActiveAndEnabled || myRenderer == null || originalMaterials == null)
         {
             return;
         }
@@ -130,10 +135,21 @@ public class HandHighlight : MonoBehaviour
             //追加:同じ公開版の再配信で強調時間を延長しない。
             if (resultMatch != view.Public.matchId || resultVersion != view.Public.stateVersion)
             {
+                //変更:別の手だけの更新では、読んでいる結果強調を途中で消さない。
+                if (resultMatch != view.Public.matchId)
+                {
+                    resultUntil = 0;
+                    highlightedVersion = -1;
+                }
                 resultMatch = view.Public.matchId;
                 resultVersion = view.Public.stateVersion;
-                resultUntil = MatchHudDisplay.ChangedHand(view.Public, player, hand.Side)
-                    ? Time.unscaledTime + resultHighlightSeconds : 0;
+                //削除:resultUntil = MatchHudDisplay.ChangedHand(view.Public, player, hand.Side)
+                //    ? Time.unscaledTime + resultHighlightSeconds : 0;
+                if (MatchHudDisplay.ChangedHand(view.Public, player, hand.Side))
+                {
+                    resultUntil = Time.unscaledTime + resultHighlightSeconds;
+                    highlightedVersion = resultVersion;
+                }
             }
             int index = (int)player * 2 + (int)hand.Side;
             var state = view.Public.hands[index];
@@ -143,7 +159,10 @@ public class HandHighlight : MonoBehaviour
         }
         //追加:切断や終了では古い結果を点灯し続けない。
         resultVisible = view?.Public != null && !view.CommunicationInterrupted &&
-            view.Public.matchPhase == (int)Waribasi.Rules.MatchPhase.Active && Time.unscaledTime < resultUntil;
+            view.Public.matchPhase == (int)Waribasi.Rules.MatchPhase.Active &&
+            //変更:NPC結果の描画待ち・可読待機中は、計算が長くても強調を先に消さない。
+            (Time.unscaledTime < resultUntil || (highlightedVersion == view.Public.stateVersion &&
+                MatchSessionAccess.Local?.IsWaitingForCardResult(view.Public) == true));
         selected = (selected || resultVisible) && alive;
         //削除:selected &= alive;
         if (selectionMarker != null)
@@ -183,6 +202,34 @@ public class HandHighlight : MonoBehaviour
         properties.SetFloat("_Selected", selected && !defended ? 1 : 0);
         properties.SetFloat("_RainbowSpeed", rainbowSpeed);
         myRenderer.SetPropertyBlock(properties);
+    }
+
+    //追加:再有効化では現在の公開状態から表示を作り直す。
+    private void OnEnable()
+    {
+        Apply();
+    }
+
+    //追加:Scene破棄や無効化で古い結果マーカーを残さない。
+    private void OnDisable()
+    {
+        resultUntil = 0;
+        resultVersion = -1;
+        highlightedVersion = -1;
+        if (myRenderer != null && originalMaterials != null)
+        {
+            myRenderer.sharedMaterials = originalMaterials;
+            myRenderer.SetPropertyBlock(null);
+        }
+        resultVisible = false;
+        if (selectionMarker != null)
+        {
+            selectionMarker.SetActive(false);
+        }
+        if (sealMarker != null)
+        {
+            sealMarker.SetActive(false);
+        }
     }
 
     private void OnDestroy()

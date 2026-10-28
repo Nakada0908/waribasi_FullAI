@@ -79,7 +79,14 @@ namespace Waribasi.Presentation.Tests
             Set(hud, "historyCloseButton", Child("CloseHistory").AddComponent<Button>());
             backs = Enumerable.Range(0, 5).Select(i => Child("Back" + i)).ToArray();
             Set(hud, "opponentCardBacks", backs);
-            Call(hud, "Awake");
+            //変更:可視状態の条件も検証するため、参照を設定してから有効にする。
+            root.AddComponent<Canvas>();
+            message.color = Color.white;
+            root.SetActive(true);
+            if (!ReferenceEquals(hud.GetType().GetProperty("Instance").GetValue(null), hud))
+            {
+                Call(hud, "Awake");
+            }
         }
 
         [TearDown]
@@ -113,7 +120,9 @@ namespace Waribasi.Presentation.Tests
             Call(interaction, "OnResponse", new RequestResponseMessage { accepted = false, ruleRejection = (int)ActionRejection.CardUnchanged });
             Assert.That(message.gameObject.activeSelf, Is.True);
             Assert.That(message.text, Does.Contain("カード未消費"));
-            Set(hud, "notificationUntil", -1f);
+            //変更:未描画を表す-1ではなく、描画後に期限切れとなった時刻を使う。
+            //削除:Set(hud, "notificationUntil", -1f);
+            Set(hud, "notificationUntil", Time.realtimeSinceStartupAsDouble - 1d);
             Call(hud, "Update");
             Assert.That(message.gameObject.activeSelf, Is.False);
             Assert.That(message.text, Is.Empty);
@@ -131,6 +140,43 @@ namespace Waribasi.Presentation.Tests
             Assert.That(timer.text, Is.EqualTo("反映中"));
             state.gate = (int)InputGate.Accepting;
             Call(hud, "Refresh");
+            Assert.That(message.gameObject.activeSelf, Is.False);
+        }
+
+        //追加:次の状態・スキップでカード本文を失わず、描画・寿命・非表示を確認する。
+        [Test]
+        public void CardNotificationSurvivesNextActionAndSkipUntilItsRenderedDeadline()
+        {
+            state.stateVersion++;
+            state.events = new[]
+            {
+                new RuleEventMessage { type = (int)RuleEventType.CardUsed,
+                    cardUse = new CardUseMessage { player = 1, kind = (int)CardKind.DrawTwo, turnNumber = 1 } }
+            };
+            Call(hud, "Refresh");
+            string card = message.text;
+            var deadline = hud.GetType().GetField("notificationUntil", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(deadline.GetValue(hud), Is.EqualTo(-1d));
+            Call(hud, "ObserveReadableDisplay");
+            double expires = (double)deadline.GetValue(hud);
+            Assert.That(expires, Is.GreaterThan(Time.realtimeSinceStartupAsDouble));
+            state.stateVersion++;
+            state.gate = (int)InputGate.Presenting;
+            state.events = new[] { new RuleEventMessage { type = (int)RuleEventType.TurnSkipped, player = 1 } };
+            Call(hud, "Refresh");
+            Assert.That(message.text, Does.Contain(card));
+            Assert.That(message.text, Does.Contain("スキップ！"));
+            Assert.That(deadline.GetValue(hud), Is.EqualTo(expires));
+            state.gate = (int)InputGate.Accepting;
+            Call(hud, "Refresh");
+            Assert.That(message.text, Is.EqualTo(card));
+            Call(hud, "SetTransitionObscured", true);
+            Call(hud, "ObserveReadableDisplay");
+            Assert.That(deadline.GetValue(hud), Is.EqualTo(-1d));
+            Call(hud, "SetTransitionObscured", false);
+            Call(hud, "ObserveReadableDisplay");
+            Assert.That(deadline.GetValue(hud), Is.GreaterThan(Time.realtimeSinceStartupAsDouble));
+            Call(hud, "OnDisable");
             Assert.That(message.gameObject.activeSelf, Is.False);
         }
 

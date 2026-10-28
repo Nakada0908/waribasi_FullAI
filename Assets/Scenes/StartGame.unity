@@ -15102,6 +15102,8 @@ MonoBehaviour:
   rightHandPrefab: {fileID: 7401720802521420057, guid: a4333f7496ab4d04f99f7c419881b167, type: 3}
   cameraPrefab: {fileID: 6606786715129777951, guid: 4232b055da1ada442a68fa48838fedc2, type: 3}
   beginnerCardPercent: 25
+  minimumFirstActionSeconds: 0.6
+  minimumCardResultSeconds: 1.5
 --- !u!4 &2026226004
 Transform:
   m_ObjectHideFlags: 0

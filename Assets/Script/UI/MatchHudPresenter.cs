@@ -36,7 +36,13 @@ namespace Waribasi.Presentation
         //private PublicMatchMessage clockState;
         //private double clockReceivedAt;
         private string notification;
-        private float notificationUntil;
+        //変更:受信時刻ではなく可読な描画時刻から通知の期限を数える。
+        //削除:private float notificationUntil;
+        private double notificationUntil = -1;
+        private long notificationVersion = -1;
+        private bool transitionObscured;
+        private bool applicationPaused;
+        private bool applicationFocused = true;
 
         private void Awake()
         {
@@ -56,6 +62,100 @@ namespace Waribasi.Presentation
             Refresh();
         }
 
+        //追加:Canvasの描画段階で結果表示を確認し、計算前の配信だけを起点にしない。
+        private void OnEnable()
+        {
+            Canvas.willRenderCanvases += ObserveReadableDisplay;
+            if (interaction != null)
+            {
+                Refresh();
+            }
+        }
+
+        private void OnDisable()
+        {
+            Canvas.willRenderCanvases -= ObserveReadableDisplay;
+            MatchSessionAccess.Local?.ObserveCardResultDisplay(interaction?.ClientState?.Public, false);
+            notification = null;
+            notificationUntil = -1;
+            notificationVersion = -1;
+            renderedVersion = -1;
+            if (messageText != null)
+            {
+                messageText.text = "";
+                messageText.gameObject.SetActive(false);
+            }
+        }
+
+        private void OnApplicationPause(bool paused)
+        {
+            applicationPaused = paused;
+            InvalidateReadableDisplay();
+        }
+
+        private void OnApplicationFocus(bool focused)
+        {
+            applicationFocused = focused;
+            InvalidateReadableDisplay();
+        }
+
+        //追加:T20はフェード開始前にtrue、完全に読める状態へ戻してからfalseを渡す。
+        public void SetTransitionObscured(bool obscured)
+        {
+            transitionObscured = obscured;
+            InvalidateReadableDisplay();
+        }
+
+        private void InvalidateReadableDisplay()
+        {
+            notificationUntil = -1;
+            MatchSessionAccess.Local?.ObserveCardResultDisplay(interaction?.ClientState?.Public, false);
+        }
+
+        private bool NotificationReadable()
+        {
+            if (!isActiveAndEnabled || transitionObscured || applicationPaused || !applicationFocused ||
+                interaction == null || interaction.HistoryOpen || MatchFlowPresenter.Instance?.ModalOpen == true ||
+                messageText == null || !messageText.isActiveAndEnabled || messageText.color.a < 0.999f ||
+                messageText.canvas == null || !messageText.canvas.isActiveAndEnabled ||
+                messageText.canvasRenderer.GetAlpha() < 0.999f)
+            {
+                return false;
+            }
+            for (var parent = messageText.transform; parent != null; parent = parent.parent)
+            {
+                foreach (var group in parent.GetComponents<CanvasGroup>())
+                {
+                    if (group.enabled && group.alpha < 0.999f)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private void ObserveReadableDisplay()
+        {
+            var view = interaction?.ClientState;
+            var state = view?.Public;
+            bool readable = NotificationReadable() && !string.IsNullOrEmpty(notification) &&
+                messageText.text.Contains(notification) && view != null && !view.CommunicationInterrupted &&
+                state?.matchPhase == (int)MatchPhase.Active;
+            if (readable && notificationUntil < 0)
+            {
+                //追加:InspectorでNPC待機を延ばしても通知が先に消えない。
+                double seconds = MatchSessionAccess.Local?.IsWaitingForCardResult(state) == true
+                    ? System.Math.Max(notificationSeconds, MatchSessionAccess.Local.MinimumCardResultSeconds) : notificationSeconds;
+                notificationUntil = Time.realtimeSinceStartupAsDouble + seconds;
+            }
+            else if (!readable && !string.IsNullOrEmpty(notification))
+            {
+                notificationUntil = -1;
+            }
+            MatchSessionAccess.Local?.ObserveCardResultDisplay(state, readable && notificationVersion == state?.stateVersion);
+        }
+
         private void OnDestroy()
         {
             if (Instance == this)
@@ -72,6 +172,8 @@ namespace Waribasi.Presentation
 
         public void ShowHistory(bool visible)
         {
+            //追加:履歴・メニューへ隠れる前に待機起点を無効化する。
+            InvalidateReadableDisplay();
             historyPanel.SetActive(visible);
             historyButton.gameObject.SetActive(!visible);
             interaction.SetHistoryOpen(visible);
@@ -80,6 +182,11 @@ namespace Waribasi.Presentation
         //変更:常設の操作説明・枚数・先後手を描かず、現在の状態と必要な結果を表示する。
         private void Refresh()
         {
+            //追加:無効化中の購読通知で古い表示を再生成しない。
+            if (!isActiveAndEnabled)
+            {
+                return;
+            }
             var view = interaction.ClientState;
             var state = view?.Public;
             string npcLabel = MatchSessionAccess.IsLocal
@@ -97,6 +204,14 @@ namespace Waribasi.Presentation
                 renderedVersion = -1;
                 renderedHistory = -1;
                 notification = null;
+                notificationVersion = -1;
+                notificationUntil = -1;
+            }
+            //追加:終了・切断後には前のカード通知を残さない。
+            if (view?.CommunicationInterrupted == true || (state != null && state.matchPhase != (int)MatchPhase.Active))
+            {
+                notification = null;
+                notificationVersion = -1;
             }
             //変更:本人札が古い場合も可否と半透明表示を再評価する。
             CardButtonDraw.Instance?.DrawOwnHand(view?.OwnHand ?? System.Array.Empty<HandCard>());
@@ -118,14 +233,23 @@ namespace Waribasi.Presentation
             if (renderedVersion != state.stateVersion)
             {
                 renderedVersion = state.stateVersion;
-                notification = null;
-                if (state.events != null)
+                //変更:次の行動・手番の更新だけでは読んでいるカード通知を消さない。
+                //削除:notification = null;
+                if (notificationVersion < 0)
+                {
+                    notification = null;
+                }
+                if (state.events != null && state.matchPhase == (int)MatchPhase.Active && !view.CommunicationInterrupted)
                 {
                     foreach (var item in state.events)
                     {
                         if (item.type == (int)RuleEventType.CardUsed && item.cardUse != null)
                         {
+                            //追加:新しい札だけは前のカード本文と混ぜず更新する。
+                            notification = null;
+                            notificationVersion = -1;
                             ShowNotification(MatchText.History(item.cardUse, view.LocalPlayer));
+                            notificationVersion = state.stateVersion;
                         }
                     }
                 }
@@ -172,8 +296,20 @@ namespace Waribasi.Presentation
         //追加:失敗と公開された札の結果を表示し、期限後には表示領域ごと隠す。
         private void ShowNotification(string text)
         {
-            notification = text;
-            notificationUntil = Time.unscaledTime + notificationSeconds;
+            //変更:結果待ち中の失敗通知はカード本文に添え、結果を上書きしない。
+            if (!isActiveAndEnabled)
+            {
+                return;
+            }
+            bool keepingCard = MatchSessionAccess.Local?.IsWaitingForCardResult(interaction.ClientState?.Public) == true &&
+                notificationVersion >= 0 && !string.IsNullOrEmpty(notification);
+            notification = keepingCard ? notification + "\n" + text : text;
+            if (!keepingCard)
+            {
+                notificationVersion = -1;
+                //削除:notificationUntil = Time.unscaledTime + notificationSeconds;
+                notificationUntil = -1;
+            }
             UpdateNotification();
         }
 
@@ -181,9 +317,18 @@ namespace Waribasi.Presentation
         {
             var view = interaction.ClientState;
             string text = MatchText.Presentation(view?.Public, view?.LocalPlayer ?? -1);
-            if (text == null && Time.unscaledTime < notificationUntil)
+            //変更:カード結果は次の状態でも期限まで残し、スキップ通知と同時に読めるようにする。
+            //削除:if (text == null && Time.unscaledTime < notificationUntil)
+            bool pendingCard = MatchSessionAccess.Local?.IsWaitingForCardResult(view?.Public) == true;
+            if (!string.IsNullOrEmpty(notification) && (notificationUntil < 0 ||
+                Time.realtimeSinceStartupAsDouble < notificationUntil || pendingCard))
             {
-                text = notification;
+                text = text == null || notification.Contains(text) ? notification : text + "\n" + notification;
+            }
+            else
+            {
+                notification = null;
+                notificationVersion = -1;
             }
             messageText.text = text ?? "";
             messageText.gameObject.SetActive(!string.IsNullOrEmpty(text));
@@ -191,6 +336,13 @@ namespace Waribasi.Presentation
 
         private void Update()
         {
+            //追加:Controllerの再有効化時、現在のカード待機に必要な本文を再生成する。
+            var state = interaction.ClientState?.Public;
+            if (MatchSessionAccess.Local?.IsWaitingForCardResult(state) == true && notificationVersion != state.stateVersion)
+            {
+                renderedVersion = -1;
+                Refresh();
+            }
             UpdateTimer();
             //追加:通知は状態配信がなくても指定時間で消す。
             UpdateNotification();

@@ -11,6 +11,8 @@ namespace Waribasi.MatchFlow
     {
         public const int ResponseCacheSize = 64;
         public const double PresentationSeconds = 1.0;
+        //追加:カード後の自動スキップ前表示は、通常攻撃・スキップ自体の演出と分ける。
+        public const double CardResultPresentationSeconds = 1.5;
         public const int RequestsPerSecond = 64;
         private readonly RuleEngine rules;
         private readonly Dictionary<ulong, CachedResponse>[] responses =
@@ -215,7 +217,9 @@ namespace Waribasi.MatchFlow
                 else if (result.Accepted && action is UseCardAction && MustAutoSkip())
                 {
                     skipAfterPresentation = true;
-                    BeginPresentation(now);
+                    //変更:既存の入力停止区間だけを延長する。通常のカード使用は時計を維持。
+                    //削除:BeginPresentation(now);
+                    BeginPresentation(now, CardResultPresentationSeconds);
                 }
                 response = new MatchResponse(request.RequestId, result.Accepted,
                     result.Accepted ? RequestRejection.None : RequestRejection.RuleRejected,
@@ -251,11 +255,14 @@ namespace Waribasi.MatchFlow
         }
 
         //追加:操作判断の時計と、確定済み結果を見せる待機を分離する。
-        private void BeginPresentation(double now)
+        //変更:演出ごとの時間を明示し、待機を加算せず一つの期限で扱う。
+        private void BeginPresentation(double now, double seconds = PresentationSeconds)
         {
             Gate = InputGate.Presenting;
             Deadline = null;
-            PresentationUntil = now + PresentationSeconds;
+            //変更:カード結果だけに独立した表示時間を適用する。
+            //削除:PresentationUntil = now + PresentationSeconds;
+            PresentationUntil = now + seconds;
         }
 
         private bool Commit(ActionResult result)

@@ -88,6 +88,10 @@ namespace Waribasi.MatchFlow.Tests
             Assert.That(match.Submit(A, Request(match, 2, MatchOperation.Skip), 130).Rejection,
                 Is.EqualTo(RequestRejection.InputClosed));
             Assert.That(match.State.StateVersion, Is.EqualTo(1));
+            //追加:既存のカード後スキップ区間だけ1.5秒へ延ばし、期限を消したままにする。
+            Assert.That(match.PresentationUntil, Is.EqualTo(131.4).Within(0.00001));
+            Assert.That(match.Tick(131.39), Is.False);
+            Assert.That(match.Deadline, Is.Null);
             var cards = match.GetObservation(A).OwnHand;
             Assert.That(match.Tick(500), Is.True);
             var skipMessage = MatchMessages.Public(match, 1, 2, 3, 500);

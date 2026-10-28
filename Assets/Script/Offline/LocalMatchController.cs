@@ -22,7 +22,12 @@ namespace Waribasi.Presentation
         [SerializeField, Range(0, 100)] private int beginnerCardPercent = 25;
         //追加:全難易度共通の演出時間。探索の計算上限とは別に調整する。
         [SerializeField, Min(0)] private float minimumFirstActionSeconds = 0.6f;
-        [SerializeField, Min(0)] private float minimumCardResultSeconds = 0.8f;
+        //変更:カード結果は可読な描画から最低1.5秒見せる。初手・探索・攻撃の時間とは独立。
+        //削除:[SerializeField, Min(0)] private float minimumCardResultSeconds = 0.8f;
+        [SerializeField, Min(0)] private float minimumCardResultSeconds = 1.5f;
+        //追加:カード表示の照会は現在の試合・版だけを対象にする。
+        private long cardResultVersion = -1;
+        public double MinimumCardResultSeconds => minimumCardResultSeconds;
         public static LocalMatchController Instance { get; private set; }
         private readonly List<MatchHandView> hands = new List<MatchHandView>();
         private readonly List<string> recentBoards = new List<string>();
@@ -147,6 +152,8 @@ namespace Waribasi.Presentation
             //変更:再戦では待機期限・計算予算・待機計測も新しい試合用に初期化する。
             //削除:thinkingTurn = -1;
             turnTiming = new NpcTurnTiming();
+            //追加:再戦で前の結果表示への照会を破棄する。
+            cardResultVersion = -1;
             turnApplications = 0;
             LastSearchStatistics = null;
             LastThinkWallMilliseconds = LastTurnThinkMilliseconds = 0;
@@ -316,6 +323,11 @@ namespace Waribasi.Presentation
         {
             generation++;
             StopThinking();
+            //追加:再有効化しても非表示だった時間でカード待機を満たさない。
+            if (cardResultVersion >= 0)
+            {
+                turnTiming.AwaitCardDisplay();
+            }
         }
 
         //変更:難易度を明示し、上級はフレームごとに探索を進める。
@@ -470,6 +482,13 @@ namespace Waribasi.Presentation
                 Publish();
                 return false;
             }
+            //追加:公開より先に描画待ちを設定し、次フレームの自動スキップも保留する。
+            cardResultVersion = actor == Session.Npc && action is UseCardAction
+                ? Session.Authority.State.StateVersion : -1;
+            if (cardResultVersion >= 0)
+            {
+                turnTiming.AwaitCardDisplay();
+            }
             if (action is AttackAction attack)
             {
                 moving = hands.Find(hand => hand.TryGetPlayer(out var player) && player == actor && hand.Side == attack.Source);
@@ -494,11 +513,32 @@ namespace Waribasi.Presentation
             }
             Publish();
             //追加:札と変化した盤面を配信した後から最低表示時間を数える。
-            if (Active && actor == Session.Npc && action is UseCardAction)
-            {
-                turnTiming.CardPublished(Now, minimumCardResultSeconds);
-            }
+            //変更:配信時刻では数えず、HUDの可読なCanvas描画から計測する。
+            //削除:if (Active && actor == Session.Npc && action is UseCardAction)
+            //{
+            //    turnTiming.CardPublished(Now, minimumCardResultSeconds);
+            //}
             return true;
+        }
+
+        //追加:HUD・手の強調が同じ現在のカード結果だけを参照する。
+        public bool IsWaitingForCardResult(PublicMatchMessage state)
+        {
+            return Active && isActiveAndEnabled && !IsWorking && state != null &&
+                SceneManager.GetActiveScene().name == "Game" &&
+                state.matchId == Session.Authority.MatchId.ToString("N") &&
+                state.stateVersion == cardResultVersion &&
+                Session.Authority.State.StateVersion == cardResultVersion &&
+                Session.Authority.State.MatchPhase == MatchPhase.Active;
+        }
+
+        //追加:T20の非表示・フェード中も同じ入口で計測を無効にできる。
+        public void ObserveCardResultDisplay(PublicMatchMessage state, bool readable)
+        {
+            if (IsWaitingForCardResult(state))
+            {
+                turnTiming.ObserveCardDisplay(readable, Now, minimumCardResultSeconds);
+            }
         }
 
         private void Animate()

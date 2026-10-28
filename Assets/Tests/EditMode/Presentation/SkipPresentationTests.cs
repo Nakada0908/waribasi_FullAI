@@ -31,12 +31,16 @@ namespace Waribasi.Presentation.Tests
             Assert.That(Text(card, localPlayer), Does.Contain("2枚補充"));
             Assert.That(Text(card, localPlayer), Does.Contain("実際に2枚補充"));
             Assert.That(Text(card, localPlayer), Does.Not.Contain("スキップ"));
-            match.Tick(131);
-            var skip = MatchMessages.Public(match, 0, 7, 3, 131);
+            //変更:カード後の独立した1.5秒を満たしてからスキップへ進む。
+            //削除:match.Tick(131);
+            match.Tick(131.4);
+            var skip = MatchMessages.Public(match, 0, 7, 3, 131.4);
             Assert.That(Text(skip, localPlayer), Is.EqualTo((localPlayer == 0 ? "自分：" : "相手：") + "スキップ！"));
             Assert.That(Text(card, localPlayer), Does.Contain("2枚補充"));
-            match.Tick(132);
-            Assert.That(Text(MatchMessages.Public(match, 0, 7, 3, 132), localPlayer), Is.Null);
+            //変更:スキップ自体の1秒はカード表示と別に維持する。
+            //削除:match.Tick(132);
+            match.Tick(132.4);
+            Assert.That(Text(MatchMessages.Public(match, 0, 7, 3, 132.4), localPlayer), Is.Null);
         }
 
         [Test]

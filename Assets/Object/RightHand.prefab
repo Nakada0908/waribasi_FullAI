@@ -776,3 +776,4 @@ MonoBehaviour:
   sealOpacity: 0.45
   rainbowSpeed: 0.3
   markerOffset: {x: 0, y: 0.22, z: 0}
+  resultHighlightSeconds: 1.5

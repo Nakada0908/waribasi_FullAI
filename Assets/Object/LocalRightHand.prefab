@@ -719,6 +719,7 @@ MonoBehaviour:
   sealOpacity: 0.45
   rainbowSpeed: 0.3
   markerOffset: {x: 0, y: 0.22, z: 0}
+  resultHighlightSeconds: 1.5
 --- !u!1 &2778568543307401687
 GameObject:
   m_ObjectHideFlags: 0

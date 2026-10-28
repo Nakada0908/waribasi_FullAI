@@ -59,6 +59,29 @@ namespace Waribasi.MatchFlow.Tests
             Assert.That(timing.CanAct(1, expected), Is.True);
         }
 
+        //追加:長い描画前処理と描画後計算の重なりを分け、待機を二重に加算しない。
+        [TestCase(0.1, false)]
+        [TestCase(1.5, true)]
+        [TestCase(2.0, true)]
+        public void CardNeedsRenderedResultAndWaitsOnlyForRemainder(double calculationAfterRender, bool ready)
+        {
+            var timing = new NpcTurnTiming();
+            timing.ObserveTurn(1, 100, 0.6);
+            timing.RecordThinking(450);
+            timing.AwaitCardDisplay();
+            Assert.That(timing.CanAct(1, 200), Is.False, "Publication without rendering cannot finish the wait.");
+            timing.ObserveCardDisplay(true, 200, 1.5);
+            timing.ObserveCardDisplay(true, 200.1, 1.5);
+            Assert.That(timing.ActionNotBefore, Is.EqualTo(201.5), "Repeated rendering does not restart the interval.");
+            Assert.That(timing.CanAct(1, 200 + calculationAfterRender), Is.EqualTo(ready));
+            Assert.That(timing.RemainingThinkMilliseconds, Is.EqualTo(550));
+            timing.ObserveCardDisplay(false, 200 + calculationAfterRender, 1.5);
+            Assert.That(timing.CanAct(1, 300), Is.False);
+            timing.ObserveCardDisplay(true, 300, 1.5);
+            Assert.That(timing.CanAct(1, 301.49), Is.False);
+            Assert.That(timing.CanAct(1, 301.5), Is.True);
+        }
+
         private static MatchAuthority Sealed(CardDefinition[] cards = null)
         {
             return new MatchAuthority(Guid.NewGuid(), RuleEngine.FromPosition(new PlayerHands(1, 1),
@@ -98,7 +121,9 @@ namespace Waribasi.MatchFlow.Tests
             Assert.That(match.Tick(100.6 + minimum - 0.01, false), Is.False);
             Assert.That(match.State.StateVersion, Is.EqualTo(1));
             Assert.That(match.LastResult.Events.Any(item => item.Type == RuleEventType.CardUsed), Is.True);
-            double readyAt = Math.Max(101.6, timing.ActionNotBefore);
+            //変更:カード結果区間とNPC待機は加算せず、遅い方の完了を待つ。
+            //削除:double readyAt = Math.Max(101.6, timing.ActionNotBefore);
+            double readyAt = Math.Max(100.6 + MatchAuthority.CardResultPresentationSeconds, timing.ActionNotBefore);
             Assert.That(match.Tick(readyAt, timing.CanAct(match.State.TurnNumber, readyAt)), Is.True);
             Assert.That(match.State.StateVersion, Is.EqualTo(2));
             Assert.That(match.LastResult.Events.Count(item => item.Type == RuleEventType.TurnSkipped), Is.EqualTo(1));
