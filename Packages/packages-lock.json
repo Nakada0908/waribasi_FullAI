@@ -1,5 +1,23 @@
 {
   "dependencies": {
+    "com.annulusgames.lit-motion": {
+      "version": "https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion#0b4c588ee75a07198841d92aab653e6b39445089",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.burst": "1.6.0",
+        "com.unity.collections": "1.5.1",
+        "com.unity.mathematics": "1.0.1"
+      },
+      "hash": "0b4c588ee75a07198841d92aab653e6b39445089"
+    },
+    "com.cysharp.unitask": {
+      "version": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask#2e993ff18f28c931602a07292df0b0804eebef99",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "2e993ff18f28c931602a07292df0b0804eebef99"
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.4",
       "depth": 0,

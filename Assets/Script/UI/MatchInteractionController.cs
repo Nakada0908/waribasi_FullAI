@@ -52,7 +52,9 @@ namespace Waribasi.Presentation
         //追加:退出確認中は盤面・札のローカル入力だけを止める。
         public bool ModalBlocked { get; private set; }
         //変更:確認モーダルを通常操作の受付条件へ含める。
-        public bool CanInteract => view != null && view.CanAct && !HistoryOpen && !ModalBlocked;
+        //変更:正式時計には介入せず、画面遷移中のローカル入力を止める。
+        //削除:public bool CanInteract => view != null && view.CanAct && !HistoryOpen && !ModalBlocked;
+        public bool CanInteract => view != null && view.CanAct && !HistoryOpen && !ModalBlocked && !SceneFade.InputBlocked;
         //削除:履歴だけを考慮していた条件。
         //public bool CanInteract => view != null && view.CanAct && !HistoryOpen;
         public bool HasSelection => Mode != MatchSelectionMode.None;

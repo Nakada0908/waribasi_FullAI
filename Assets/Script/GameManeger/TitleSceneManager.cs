@@ -1,4 +1,5 @@
 //変更:キーはInput System、クリックとタッチは同じUIイベントで開始する。
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Waribasi.Presentation;
@@ -18,10 +19,27 @@ public class TitleSceneManager : MonoBehaviour
     //追加:タイトル全体のButtonから呼ぶ。一度のScene遷移だけ受け付ける。
     public void Begin()
     {
-        if (!loading)
+        if (!loading && !SceneFade.InputBlocked)
         {
             loading = true;
-            SceneManager.LoadScene("StartGame");
+            //変更:T20の暗転完了後に1回だけ設定画面へ移る。
+            //削除:SceneManager.LoadScene("StartGame");
+            BeginWithFade().Forget();
+        }
+    }
+    //追加:元のSceneが破棄されても、常駐フェード側が新画面の表示と入力解除を行う。
+    private async UniTask BeginWithFade()
+    {
+        try
+        {
+            await SceneFade.LoadLocalAsync("StartGame", destroyCancellationToken);
+        }
+        finally
+        {
+            if (this != null)
+            {
+                loading = false;
+            }
         }
     }
 }

@@ -65,6 +65,8 @@ namespace Waribasi.Presentation
         //追加:Canvasの描画段階で結果表示を確認し、計算前の配信だけを起点にしない。
         private void OnEnable()
         {
+            //追加:Sceneロード中に生成されても可読時間を先に開始しない。
+            SetTransitionObscured(PresentationVisibility.Obscured);
             Canvas.willRenderCanvases += ObserveReadableDisplay;
             if (interaction != null)
             {
@@ -80,6 +82,15 @@ namespace Waribasi.Presentation
             notificationUntil = -1;
             notificationVersion = -1;
             renderedVersion = -1;
+            //追加:Controller無効化で履歴と入力遮断を残さない。
+            if (historyPanel != null)
+            {
+                historyPanel.SetActive(false);
+            }
+            if (interaction != null)
+            {
+                interaction.SetHistoryOpen(false);
+            }
             if (messageText != null)
             {
                 messageText.text = "";
@@ -102,6 +113,11 @@ namespace Waribasi.Presentation
         //追加:T20はフェード開始前にtrue、完全に読める状態へ戻してからfalseを渡す。
         public void SetTransitionObscured(bool obscured)
         {
+            //追加:同一フラグの再通知でカードの描画起点を繰り返し破棄しない。
+            if (transitionObscured == obscured)
+            {
+                return;
+            }
             transitionObscured = obscured;
             InvalidateReadableDisplay();
         }
@@ -174,9 +190,27 @@ namespace Waribasi.Presentation
         {
             //追加:履歴・メニューへ隠れる前に待機起点を無効化する。
             InvalidateReadableDisplay();
-            historyPanel.SetActive(visible);
-            historyButton.gameObject.SetActive(!visible);
-            interaction.SetHistoryOpen(visible);
+            //変更:閉じ終わるまでは履歴の遮断を維持する。通常の正式時計は止めない。
+            //削除:historyPanel.SetActive(visible);
+            //削除:historyButton.gameObject.SetActive(!visible);
+            //削除:interaction.SetHistoryOpen(visible);
+            if (visible && SceneFade.InputBlocked)
+            {
+                return;
+            }
+            if (visible)
+            {
+                historyButton.gameObject.SetActive(false);
+                interaction.SetHistoryOpen(true);
+            }
+            PanelFade.For(historyPanel).SetVisible(visible, () =>
+            {
+                if (this != null && interaction != null && historyPanel != null && !historyPanel.activeSelf)
+                {
+                    historyButton.gameObject.SetActive(true);
+                    interaction.SetHistoryOpen(false);
+                }
+            });
         }
 
         //変更:常設の操作説明・枚数・先後手を描かず、現在の状態と必要な結果を表示する。
@@ -330,12 +364,36 @@ namespace Waribasi.Presentation
                 notification = null;
                 notificationVersion = -1;
             }
-            messageText.text = text ?? "";
-            messageText.gameObject.SetActive(!string.IsNullOrEmpty(text));
+            //変更:カード画像のCanvasGroupには触れず、通知本文だけをフェードする。
+            //削除:messageText.text = text ?? "";
+            //削除:messageText.gameObject.SetActive(!string.IsNullOrEmpty(text));
+            var fade = PanelFade.For(messageText.gameObject);
+            if (!string.IsNullOrEmpty(text))
+            {
+                messageText.text = text;
+                fade.ShowContent(text);
+            }
+            else
+            {
+                fade.SetVisible(false, () =>
+                {
+                    //追加:閉じる間は本文を保持し、非表示になってから空にする。
+                    if (this != null && messageText != null && !messageText.gameObject.activeSelf)
+                    {
+                        messageText.text = "";
+                    }
+                });
+            }
         }
 
         private void Update()
         {
+            //追加:履歴パネルの外部無効化でも閉じる操作と同じ入力状態へ戻す。
+            if (historyPanel != null && !historyPanel.activeSelf && interaction != null && interaction.HistoryOpen)
+            {
+                historyButton.gameObject.SetActive(true);
+                interaction.SetHistoryOpen(false);
+            }
             //追加:Controllerの再有効化時、現在のカード待機に必要な本文を再生成する。
             var state = interaction.ClientState?.Public;
             if (MatchSessionAccess.Local?.IsWaitingForCardResult(state) == true && notificationVersion != state.stateVersion)

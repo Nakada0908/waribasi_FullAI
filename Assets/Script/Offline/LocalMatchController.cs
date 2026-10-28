@@ -1,3 +1,4 @@
+using Cysharp.Threading.Tasks;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -48,6 +49,8 @@ namespace Waribasi.Presentation
         public double LastPresentationWaitMilliseconds { get; private set; }
         public double LastTurnWaitMilliseconds => turnTiming.WaitMilliseconds;
         public bool IsThinking => thinking != null;
+        //追加:無効化・退出時にロード開始前のフェードを取り消す。
+        private System.Threading.CancellationTokenSource fadeLifetime;
         private bool loading;
         private bool preparing;
         private int generation;
@@ -178,8 +181,26 @@ namespace Waribasi.Presentation
             //追加:Scene読み込み中に探索を継続しない。
             StopThinking();
             loading = true;
-            SceneManager.LoadSceneAsync(scene);
+            //変更:既存のScene所有者を保ち、常駐フェードへ表示順だけを委ねる。
+            //削除:SceneManager.LoadSceneAsync(scene);
+            LoadWithFade(scene, generation).Forget();
             Changed?.Invoke();
+        }
+
+        //追加:フェード後にのみロードし、破棄・無効化後の古い要求を実行しない。
+        private async UniTask LoadWithFade(string scene, int epoch)
+        {
+            bool loaded = await SceneFade.LoadLocalAsync(scene, fadeLifetime.Token);
+            if (this != null && epoch == generation && !loaded)
+            {
+                loading = false;
+                Changed?.Invoke();
+            }
+        }
+
+        private void OnEnable()
+        {
+            fadeLifetime = new System.Threading.CancellationTokenSource();
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -321,6 +342,13 @@ namespace Waribasi.Presentation
         //追加:無効化中の探索を残さない。
         private void OnDisable()
         {
+            //追加:開始済みのUnityロードは常駐側で後処理し、未開始分だけを取り消す。
+            if (fadeLifetime != null)
+            {
+                fadeLifetime.Cancel();
+                fadeLifetime.Dispose();
+                fadeLifetime = null;
+            }
             generation++;
             StopThinking();
             //追加:再有効化しても非表示だった時間でカード待機を満たさない。
@@ -642,14 +670,18 @@ namespace Waribasi.Presentation
             {
                 //追加:Web版の終了もオンラインと揃え、破棄済みの対戦画面に残さない。
 #if UNITY_WEBGL && !UNITY_EDITOR
-                SceneManager.LoadSceneAsync("Title");
+                //変更:Web終了時も通常遷移と同じフェードを使う。
+                //削除:SceneManager.LoadSceneAsync("Title");
+                Load("Title");
 #else
                 Application.Quit();
 #endif
             }
             else
             {
-                SceneManager.LoadSceneAsync(destination);
+                //変更:退出先を多重ロードせず、フェード完了後に開く。
+                //削除:SceneManager.LoadSceneAsync(destination);
+                Load(destination);
             }
             Changed?.Invoke();
         }

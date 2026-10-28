@@ -1,3 +1,5 @@
+using Cysharp.Threading.Tasks;
+using Waribasi.Presentation;
 using System;
 using System.Collections;
 using System.Linq;
@@ -42,6 +44,8 @@ namespace Waribasi.Networking
             public bool peer;
             public bool resultReady;
             public bool agree;
+            //追加:既存State通知に表示用の行先だけを載せる。ロード権限は渡さない。
+            public string transition;
         }
 
         private enum ControlKind
@@ -67,6 +71,10 @@ namespace Waribasi.Networking
         private bool restarting;
         private bool peerLeft;
         private bool resultReady;
+        //追加:ホストが確定した遷移の通知用。正式なSceneロードはNGOだけが行う。
+        private string transitionScene;
+        //追加:一度無効化された遷移は、再有効化後も再開しない。
+        private System.Threading.CancellationTokenSource fadeLifetime;
         private bool loading;
         //追加:切断が重なってもローカル結果遷移は1本にまとめる。
         private bool openingLocalResult;
@@ -145,6 +153,8 @@ namespace Waribasi.Networking
             }
             manager.CustomMessagingManager.RegisterNamedMessageHandler(Channel, ReceiveControl);
             manager.SceneManager.OnLoadEventCompleted += OnSceneLoaded;
+            //追加:通常の事前通知よりNGOのLoadが先に届いた端末にも暗転を適用する。
+            manager.SceneManager.OnSceneEvent += OnFadeSceneEvent;
             handlersRegistered = true;
         }
 
@@ -156,6 +166,8 @@ namespace Waribasi.Networking
                 if (manager.SceneManager != null)
                 {
                     manager.SceneManager.OnLoadEventCompleted -= OnSceneLoaded;
+                    //追加:旧セッションのフェード購読を解除する。
+                    manager.SceneManager.OnSceneEvent -= OnFadeSceneEvent;
                 }
             }
             handlersRegistered = false;
@@ -235,25 +247,98 @@ namespace Waribasi.Networking
                 (pendingScene != "End" || departure == null || HasPeer) &&
                 (pendingScene != "End" || SceneManager.GetActiveScene().name != "Game" || ResultDisplayComplete()))
             {
+                //変更:表示完了を満たした時点で遷移を1回確保し、暗転後にNGOでロードする。
+                //削除:var progress = manager.SceneManager.LoadScene(next, LoadSceneMode.Single);
                 string next = pendingScene;
-                var progress = manager.SceneManager.LoadScene(next, LoadSceneMode.Single);
-                if (progress == SceneEventProgressStatus.Started)
-                {
-                    pendingScene = null;
-                    loading = true;
-                    Notify();
-                }
-                else if (progress != SceneEventProgressStatus.SceneEventInProgress)
-                {
-                    pendingScene = null;
-                    SetStatus("画面を読み込めませんでした。退出して再試行してください");
-                }
+                pendingScene = null;
+                loading = true;
+                LoadNetworkWithFade(next).Forget();
             }
             if (departure != null)
             {
                 ProcessDeparture();
             }
             UpdateConnection();
+        }
+
+        //追加:各参加側は通知に従って暗転するだけで、独断でSceneを開かない。
+        private void OnFadeSceneEvent(SceneEvent sceneEvent)
+        {
+            if (isActiveAndEnabled && sceneEvent.SceneEventType == SceneEventType.Load && !returning && !restarting)
+            {
+                SceneFade.BeginNetworkCover();
+            }
+        }
+
+        private async UniTask LoadNetworkWithFade(string next)
+        {
+            bool started = false;
+            try
+            {
+                transitionScene = next;
+                SendSnapshot(ControlKind.State);
+                transitionScene = null;
+                var token = fadeLifetime.Token;
+                await SceneFade.CoverNetworkAsync(token);
+                token.ThrowIfCancellationRequested();
+                if (this == null || !isActiveAndEnabled || returning || restarting || manager == null || !manager.IsHost || !manager.IsListening)
+                {
+                    return;
+                }
+                var progress = manager.SceneManager.LoadScene(next, LoadSceneMode.Single);
+                started = progress == SceneEventProgressStatus.Started;
+                if (!started)
+                {
+                    if (progress == SceneEventProgressStatus.SceneEventInProgress)
+                    {
+                        pendingScene = next;
+                    }
+                    else
+                    {
+                        SetStatus("画面を読み込めませんでした。退出して再試行してください");
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception error)
+            {
+                Debug.LogException(error);
+            }
+            finally
+            {
+                if (!started)
+                {
+                    SceneFade.AbortNetworkCover();
+                    if (this != null)
+                    {
+                        transitionScene = null;
+                        loading = false;
+                    }
+                }
+                if (this != null)
+                {
+                    Notify();
+                }
+            }
+        }
+
+        //追加:無効化時は未完了の表示遮断だけを解除し、古いロードを続行しない。
+        private void OnEnable()
+        {
+            fadeLifetime = new System.Threading.CancellationTokenSource();
+        }
+
+        private void OnDisable()
+        {
+            if (fadeLifetime != null)
+            {
+                fadeLifetime.Cancel();
+                fadeLifetime.Dispose();
+                fadeLifetime = null;
+            }
+            SceneFade.AbortNetworkCover();
         }
 
         private void OnConnected(ulong clientId)
@@ -331,7 +416,11 @@ namespace Waribasi.Networking
             if (SceneManager.GetActiveScene().name == "Game" && !returning && !loading && departure == null)
             {
                 loading = true;
-                SceneManager.LoadScene("End");
+                //変更:切断後に限る既存のローカル結果遷移も同じ表示順へ通す。
+                //削除:SceneManager.LoadScene("End");
+                //追加:切断で不要になったネットワーク暗転を解放してからローカルへ移る。
+                SceneFade.AbortNetworkCover();
+                yield return SceneFade.LoadLocalAsync("End", destroyCancellationToken).ToCoroutine();
                 loading = false;
             }
             openingLocalResult = false;
@@ -576,17 +665,24 @@ namespace Waribasi.Networking
                 SetStatus("接続の後片付けをしています");
             }
             Instance = null;
+            //追加:退出先がWeb版Titleの場合も古いネットワーク暗転を残さない。
+            SceneFade.AbortNetworkCover();
             if (destination == "Quit")
             {
 #if UNITY_WEBGL && !UNITY_EDITOR
-                SceneManager.LoadScene("Title");
+                //変更:接続終了後のWeb版の戻りもフェードする。
+                //削除:SceneManager.LoadScene("Title");
+                yield return SceneFade.LoadLocalAsync("Title", destroyCancellationToken).ToCoroutine();
 #else
                 Application.Quit();
 #endif
             }
             else
             {
-                SceneManager.LoadScene(destination);
+                //変更:NGOの終了後に限り、退出端末がローカルSceneを開く。
+                //削除:SceneManager.LoadScene(destination);
+                SceneFade.AbortNetworkCover();
+                yield return SceneFade.LoadLocalAsync(destination, destroyCancellationToken).ToCoroutine();
             }
             Destroy(gameObject);
         }
@@ -602,6 +698,8 @@ namespace Waribasi.Networking
                 kind = (int)kind, session = flow.SessionId.ToString("N"), match = flow.MatchId.ToString("N"), round = flow.Round,
                 serial = ++serial, mode = (int)flow.Setup.Mode, first = (int)flow.Setup.First, seconds = flow.Setup.TurnSeconds,
                 phase = (int)flow.Phase, voteA = flow.PlayerARematch, voteB = flow.PlayerBRematch,
+                //追加:検証済みStateと同じ直列番号で暗転だけを通知する。
+                transition = transitionScene,
                 peer = flow.PeerPresent && !peerLeft, resultReady = resultReady
             };
             foreach (ulong peer in manager.ConnectedClientsIds.Where(id => id != NetworkManager.ServerClientId).ToArray())
@@ -744,11 +842,21 @@ namespace Waribasi.Networking
             {
                 return;
             }
+            //追加:表示の行先もホストの検証済みセッションと2Sceneに限定する。
+            if (!string.IsNullOrEmpty(message.transition) && message.transition != "Game" && message.transition != "End")
+            {
+                return;
+            }
             bool firstOffer = remote == null;
             receivedSerial = message.serial;
             remote = message;
             remoteSetup = new MatchSetup((MatchMode)message.mode, (FirstTurnSetting)message.first, message.seconds);
             resultReady = message.resultReady;
+            //追加:参加側は暗転だけを行う。SceneManager.LoadSceneは呼ばない。
+            if (!string.IsNullOrEmpty(message.transition) && SceneManager.GetActiveScene().name != message.transition)
+            {
+                SceneFade.BeginNetworkCover();
+            }
             if (firstOffer)
             {
                 settingsShownAt = Time.unscaledTime;

@@ -25,9 +25,12 @@ namespace Waribasi.Presentation
         private int pointerReadyAfterFrame;
         private readonly HashSet<int> rejectedPointers = new HashSet<int>();
 
-        public static bool StartPressed => Keyboard.current != null && Keyboard.current.anyKey.wasPressedThisFrame;
-        public static bool RestartPressed => Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
-        public static bool EscapePressed => Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
+        //変更:直接参照する画面別のキー処理も暗転中は実行しない。
+        public static bool StartPressed => !SceneFade.InputBlocked && Keyboard.current != null && Keyboard.current.anyKey.wasPressedThisFrame;
+        //変更:直接参照する画面別のキー処理も暗転中は実行しない。
+        public static bool RestartPressed => !SceneFade.InputBlocked && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+        //変更:直接参照する画面別のキー処理も暗転中は実行しない。
+        public static bool EscapePressed => !SceneFade.InputBlocked && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
         public static bool EscapeReservedForText { get; private set; }
         public static bool IsEditingText => EventSystem.current != null &&
             EventSystem.current.currentSelectedGameObject != null &&
@@ -71,7 +74,8 @@ namespace Waribasi.Presentation
                 lastTouch = Time.unscaledTime;
             }
             //変更:Scene切替直後に残った入力も重複操作として拒否する。
-            if (!pointerReady || holding || rejectedPointers.Count > 0 ||
+            //変更:暗転中の押下を新しい画面へ持ち越さない。
+            if (SceneFade.InputBlocked || !pointerReady || holding || rejectedPointers.Count > 0 ||
                 (!touch && Time.unscaledTime - lastTouch < touchMouseSuppression))
             {
                 rejectedPointers.Add(data.pointerId);
@@ -97,7 +101,8 @@ namespace Waribasi.Presentation
 
         public bool Consume(long gesture)
         {
-            if (gesture == 0 || gesture != releasedGesture || gesture == consumedGesture || releasedFrame != Time.frameCount)
+            //変更:暗転開始前に離された操作も、遷移中は確定しない。
+            if (SceneFade.InputBlocked || gesture == 0 || gesture != releasedGesture || gesture == consumedGesture || releasedFrame != Time.frameCount)
             {
                 return false;
             }
@@ -108,7 +113,8 @@ namespace Waribasi.Presentation
         public bool ConsumeKeyboard()
         {
             //変更:新しい画面の初期処理中は、引き継がれたSubmitも実行しない。
-            if (!pointerReady || holding || keyboardFrame == Time.frameCount)
+            //変更:ポインターと同じ遷移ガードをSubmitにも適用する。
+            if (SceneFade.InputBlocked || !pointerReady || holding || keyboardFrame == Time.frameCount)
             {
                 return false;
             }
@@ -119,6 +125,14 @@ namespace Waribasi.Presentation
         private void Update()
         {
             EscapeReservedForText = EscapePressed && IsEditingText;
+            //追加:フェードを跨いだ長押しは、解除後の新しい押下まで受け付けない。
+            if (SceneFade.InputBlocked)
+            {
+                pointerReady = false;
+                pointerReadyAfterFrame = Time.frameCount;
+                holding = false;
+                heldGesture = releasedGesture = 0;
+            }
         }
 
         private void LateUpdate()

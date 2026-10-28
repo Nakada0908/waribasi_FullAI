@@ -58,6 +58,12 @@ namespace Waribasi.Presentation
 
         private void Update()
         {
+            //追加:パネル自体が外部から無効化された場合も盤面の遮断を残さない。
+            var input = MatchInteractionController.Instance;
+            if (!ModalOpen && input != null && input.ModalBlocked)
+            {
+                input.SetModalBlocked(false);
+            }
             //変更:ローカルとオンラインで現在の表示状態を切り替える。
             if (view != MatchSessionAccess.State)
             {
@@ -77,7 +83,18 @@ namespace Waribasi.Presentation
             if (preparationPanel != null)
             {
                 bool preparing = state == null || state.matchPhase == (int)MatchPhase.Preparing;
-                preparationPanel.SetActive(preparing && !(view != null && view.CommunicationInterrupted));
+                //変更:準備パネルの表示をフェードへ通し、正式開始後の入力は遮らない。
+                //削除:preparationPanel.SetActive(preparing && !(view != null && view.CommunicationInterrupted));
+                bool visible = preparing && !(view != null && view.CommunicationInterrupted);
+                var fade = PanelFade.For(preparationPanel);
+                if (visible)
+                {
+                    fade.ShowContent(preparationText != null ? preparationText.text : "preparing");
+                }
+                else
+                {
+                    fade.SetVisible(false, blockWhileHiding: false);
+                }
                 if (state != null && (shownVersion != state.stateVersion || shownMatch != state.matchId))
                 {
                     shownVersion = state.stateVersion;
@@ -86,6 +103,12 @@ namespace Waribasi.Presentation
                     //削除:shownAt = Time.unscaledTime;
                     Refresh();
                 }
+            }
+            //追加:勝敗は一度だけフェードし、通常の状態再通知では表示起点を戻さない。
+            if (resultText != null && view != null && (view.HasConfirmedResult || view.CommunicationInterrupted ||
+                state?.matchPhase == (int)MatchPhase.Interrupted))
+            {
+                PanelFade.For(resultText.gameObject).ShowContent((state?.matchId ?? "connection-interrupted") + ":result");
             }
             if (surrenderPending)
             {
@@ -105,6 +128,8 @@ namespace Waribasi.Presentation
         //追加:描画される段階を表示起点にし、非表示・破棄中は計測を残さない。
         private void OnEnable()
         {
+            //追加:新しいSceneのPresenterも、常駐フェードの現在状態を引き継ぐ。
+            SetTransitionObscured(PresentationVisibility.Obscured);
             Canvas.willRenderCanvases += ObserveReadableDisplay;
         }
 
@@ -113,6 +138,24 @@ namespace Waribasi.Presentation
             Canvas.willRenderCanvases -= ObserveReadableDisplay;
             preparationTiming.Invalidate();
             resultTiming.Invalidate();
+            //追加:Controller無効化でも、別オブジェクトのTweenとモーダル遮断を残さない。
+            if (preparationPanel != null)
+            {
+                PanelFade.For(preparationPanel).Finish();
+            }
+            if (resultText != null)
+            {
+                PanelFade.For(resultText.gameObject).Finish();
+            }
+            if (menuPanel != null)
+            {
+                menuPanel.SetActive(false);
+            }
+            var input = MatchInteractionController.Instance;
+            if (input != null)
+            {
+                input.SetModalBlocked(false);
+            }
         }
 
         //追加:バックグラウンドに隠れていた時間も読み取り時間へ含めない。
@@ -139,6 +182,11 @@ namespace Waribasi.Presentation
         //追加:T20はフェード開始前にtrue、読み終えられる状態になってからfalseを渡す。
         public void SetTransitionObscured(bool obscured)
         {
+            //追加:同じ通知でT16の可読時間を毎回リセットしない。
+            if (transitionObscured == obscured)
+            {
+                return;
+            }
             transitionObscured = obscured;
             if (obscured)
             {
@@ -241,10 +289,17 @@ namespace Waribasi.Presentation
 
         public void OpenMenu()
         {
+            //追加:フェード中のEscapeや直接呼出しでも二重遷移を始めない。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             MatchHudPresenter.Instance?.ShowHistory(false);
             MatchInteractionController.Instance?.SetModalBlocked(true);
             confirmation = null;
-            menuPanel.SetActive(true);
+            //変更:既存メニューの配置・参照を保って表示する。
+            //削除:menuPanel.SetActive(true);
+            PanelFade.For(menuPanel).SetVisible(true);
             menuChoices.SetActive(true);
             confirmationChoices.SetActive(false);
             //変更:時間制限のないNPC戦には操作時計の説明を表示しない。
@@ -256,12 +311,26 @@ namespace Waribasi.Presentation
         {
             confirmation = null;
             surrenderPending = false;
-            menuPanel.SetActive(false);
-            MatchInteractionController.Instance?.SetModalBlocked(false);
+            //変更:閉じるフェード中もモーダルを維持し、完了後に盤面入力を戻す。
+            //削除:menuPanel.SetActive(false);
+            //削除:MatchInteractionController.Instance?.SetModalBlocked(false);
+            PanelFade.For(menuPanel).SetVisible(false, () =>
+            {
+                var input = MatchInteractionController.Instance;
+                if (this != null && input != null && !ModalOpen)
+                {
+                    input.SetModalBlocked(false);
+                }
+            });
         }
 
         public void HandleEscape()
         {
+            //追加:暗転中はメニューを開閉しない。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             if (ModalOpen)
             {
                 CloseMenu();
@@ -278,6 +347,11 @@ namespace Waribasi.Presentation
 
         private void Ask(string action, string text)
         {
+            //追加:遷移中の直接呼出しも同じガードへ通す。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             OpenMenu();
             confirmation = action;
             //変更:NPCの確認画面も時間制限なしの表示に揃える。
@@ -293,6 +367,11 @@ namespace Waribasi.Presentation
 
         public void AcceptConfirmation()
         {
+            //追加:遷移中の直接呼出しも同じガードへ通す。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             if (confirmation == null)
             {
                 return;
@@ -320,6 +399,11 @@ namespace Waribasi.Presentation
 
         public void CancelPreparation()
         {
+            //追加:遷移中の直接呼出しも同じガードへ通す。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             //変更:NPC準備は勝敗を付けずに設定へ戻す。
             if (MatchSessionAccess.IsLocal)
             {
@@ -333,6 +417,11 @@ namespace Waribasi.Presentation
 
         public void Rematch()
         {
+            //追加:遷移中の直接呼出しも同じガードへ通す。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             //変更:NPCの再戦は人間の操作だけで開始する。
             if (MatchSessionAccess.IsLocal)
             {
@@ -346,6 +435,11 @@ namespace Waribasi.Presentation
 
         public void ReturnMode()
         {
+            //追加:遷移中の直接呼出しも同じガードへ通す。
+            if (SceneFade.InputBlocked)
+            {
+                return;
+            }
             if (IsActiveMatch())
             {
                 ConfirmLeave();

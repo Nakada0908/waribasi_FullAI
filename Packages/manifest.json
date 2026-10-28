@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask#2e993ff18f28c931602a07292df0b0804eebef99",
+    "com.annulusgames.lit-motion": "https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion#0b4c588ee75a07198841d92aab653e6b39445089",
     "com.unity.ai.navigation": "2.0.4",
     "com.unity.burst": "1.8.13",
     "com.unity.collab-proxy": "2.10.1",
