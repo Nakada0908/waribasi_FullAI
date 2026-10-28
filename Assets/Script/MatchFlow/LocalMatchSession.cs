@@ -47,7 +47,8 @@ namespace Waribasi.MatchFlow
         public MatchResponse Submit(PlayerId actor, GameAction action, long version, double now)
         {
             //変更:受理した行動で正式な盤面勝利が確定した後にだけ保存する。
-            var response = Authority.Submit(actor, Request(actor, action, version, false), now);
+            //変更:ローカルの自動スキップはControllerの待機判定を通したTickだけで進める。
+            var response = Authority.Submit(actor, Request(actor, action, version, false), now, allowAutomaticSkip: false);
             if (response.Accepted)
             {
                 progress?.RecordResult(Setup.Difficulty, Authority.State, Human);
@@ -57,7 +58,8 @@ namespace Waribasi.MatchFlow
 
         public MatchResponse Surrender(long version, double now)
         {
-            return Authority.Submit(Human, Request(Human, null, version, true), now);
+            //変更:NPCの待機中でも提示した版で降参でき、保留中スキップを取り消す。
+            return Authority.Submit(Human, Request(Human, null, version, true), now, allowAutomaticSkip: false);
         }
 
         private MatchRequest Request(PlayerId actor, GameAction action, long version, bool surrender)

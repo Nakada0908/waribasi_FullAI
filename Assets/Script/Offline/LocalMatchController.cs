@@ -20,6 +20,9 @@ namespace Waribasi.Presentation
         [SerializeField] private GameObject rightHandPrefab;
         [SerializeField] private Camera cameraPrefab;
         [SerializeField, Range(0, 100)] private int beginnerCardPercent = 25;
+        //追加:全難易度共通の演出時間。探索の計算上限とは別に調整する。
+        [SerializeField, Min(0)] private float minimumFirstActionSeconds = 0.6f;
+        [SerializeField, Min(0)] private float minimumCardResultSeconds = 0.8f;
         public static LocalMatchController Instance { get; private set; }
         private readonly List<MatchHandView> hands = new List<MatchHandView>();
         private readonly List<string> recentBoards = new List<string>();
@@ -28,12 +31,17 @@ namespace Waribasi.Presentation
         //追加:上級の探索と推定は試合単位、予算はカード後も同じ手番で共有する。
         private AdvancedNpc advancedThinking;
         private OpponentHandEstimator handEstimator;
-        private long thinkingTurn = -1;
-        private double turnThinkStarted;
+        //変更:旧手番開始時刻からの経過計測を、計算と演出待機の別計測へ置き換える。
+        //削除:private long thinkingTurn = -1;
+        //削除:private double turnThinkStarted;
+        private NpcTurnTiming turnTiming = new NpcTurnTiming();
         private int turnApplications;
         public NpcSearchStatistics LastSearchStatistics { get; private set; }
         public double LastThinkWallMilliseconds { get; private set; }
         public double LastTurnThinkMilliseconds { get; private set; }
+        //追加:計算後の演出待ちを、CPU・分割探索の時間と分けて公開する。
+        public double LastPresentationWaitMilliseconds { get; private set; }
+        public double LastTurnWaitMilliseconds => turnTiming.WaitMilliseconds;
         public bool IsThinking => thinking != null;
         private bool loading;
         private bool preparing;
@@ -132,10 +140,14 @@ namespace Waribasi.Presentation
             choices = RuleRandom.Create();
             //追加:再戦で推定と手番予算を初期化する。
             handEstimator = new OpponentHandEstimator();
-            thinkingTurn = -1;
+            //変更:再戦では待機期限・計算予算・待機計測も新しい試合用に初期化する。
+            //削除:thinkingTurn = -1;
+            turnTiming = new NpcTurnTiming();
             turnApplications = 0;
             LastSearchStatistics = null;
             LastThinkWallMilliseconds = LastTurnThinkMilliseconds = 0;
+            //追加:前試合の待機時間を表示や検証へ残さない。
+            LastPresentationWaitMilliseconds = 0;
             LastThinkMilliseconds = 0;
             LastCandidateCount = 0;
             recentBoards.Clear();
@@ -224,11 +236,19 @@ namespace Waribasi.Presentation
             }
             var authority = Session.Authority;
             Animate();
-            if (authority.Tick(Now))
+            //追加:受付開始時を起点にする。直前の攻撃演出中は次のNPCの待ち時間に数えない。
+            ObserveNpcTurn();
+            //変更:自動スキップも通常のNPC行動と同じ最低待ちを通す。
+            //削除:if (authority.Tick(Now))
+            bool allowAutomaticSkip = authority.State.CurrentPlayer != Session.Npc ||
+                turnTiming.CanAct(authority.State.TurnNumber, Now);
+            if (authority.Tick(Now, allowAutomaticSkip))
             {
                 ApplyPoses();
                 Publish();
             }
+            //追加:Tickが前の演出を閉じて受付を開いたフレームから計測する。
+            ObserveNpcTurn();
             if (authority.State.MatchPhase == MatchPhase.Finished)
             {
                 if (endedAt < 0)
@@ -244,6 +264,18 @@ namespace Waribasi.Presentation
             else if (authority.Gate == InputGate.Accepting && authority.State.CurrentPlayer == Session.Npc && thinking == null)
             {
                 thinking = StartCoroutine(Think(generation));
+            }
+        }
+
+        //追加:カード後の再判断では同じ手番の計算残量と表示期限を維持する。
+        private void ObserveNpcTurn()
+        {
+            var authority = Session.Authority;
+            if (authority.State.MatchPhase == MatchPhase.Active && authority.Gate == InputGate.Accepting &&
+                authority.State.CurrentPlayer == Session.Npc && turnTiming.TurnNumber != authority.State.TurnNumber)
+            {
+                turnTiming.ObserveTurn(authority.State.TurnNumber, Now, minimumFirstActionSeconds);
+                turnApplications = 0;
             }
         }
 
@@ -271,22 +303,27 @@ namespace Waribasi.Presentation
             var match = authority.MatchId;
             var observation = authority.GetObservation(Session.Npc);
             //変更:カード後には初期待機と手番全体の予算をリセットしない。
-            bool newTurn = thinkingTurn != observation.PublicState.TurnNumber;
-            if (newTurn)
-            {
-                thinkingTurn = observation.PublicState.TurnNumber;
-                turnThinkStarted = Now;
-                turnApplications = 0;
-            }
-            double calledAt = Now;
+            //変更:思考を先に実行し、最初の行動期限まで残った分だけ後で待つ。
+            //削除:旧手番開始からの予算算出を保存する。
+            //bool newTurn = thinkingTurn != observation.PublicState.TurnNumber;
+            //if (newTurn)
+            //{
+            //    thinkingTurn = observation.PublicState.TurnNumber;
+            //    turnThinkStarted = Now;
+            //    turnApplications = 0;
+            //}
             //削除:カード後も繰り返していた待機。
             //yield return new WaitForSecondsRealtime(0.3f);
-            yield return new WaitForSecondsRealtime(newTurn ? 0.3f : 0);
+            //削除:yield return new WaitForSecondsRealtime(newTurn ? 0.3f : 0);
+            //追加:同期思考でもStartCoroutineの戻り前に完了させず、停止用ハンドルを確実に保持する。
+            yield return null;
             if (!CanThink(epoch, match, observation.PublicState.StateVersion))
             {
                 thinking = null;
                 yield break;
             }
+            //追加:初回のフレーム待ちを計算予算へ含めない。
+            double calledAt = Now;
             var timer = Stopwatch.StartNew();
             GameAction action = null;
             if (Session.Setup.Difficulty == NpcDifficulty.Beginner)
@@ -309,7 +346,9 @@ namespace Waribasi.Presentation
             {
                 var options = new NpcSearchOptions
                 {
-                    MaxMilliseconds = Math.Max(1, Math.Min(600, (turnThinkStarted + 1 - Now) * 1000)),
+                    //変更:カード結果の表示待ちを手番全体1秒の計算予算から差し引かない。
+                    //削除:MaxMilliseconds = Math.Max(1, Math.Min(600, (turnThinkStarted + 1 - Now) * 1000)),
+                    MaxMilliseconds = Math.Min(600, turnTiming.RemainingThinkMilliseconds),
                     MaxApplications = Math.Max(1, 40000 - turnApplications)
                 };
                 //追加:相手観測は最強の分岐だけで読み、札の定義以外を探索へ渡さない。
@@ -357,7 +396,23 @@ namespace Waribasi.Presentation
                 LastThinkMilliseconds = timer.Elapsed.TotalMilliseconds;
             }
             LastThinkWallMilliseconds = (Now - calledAt) * 1000;
-            LastTurnThinkMilliseconds = (Now - turnThinkStarted) * 1000;
+            //変更:分割探索中のフレーム待ちは計算経過に含め、結果を見せる待機は別に記録する。
+            //削除:LastTurnThinkMilliseconds = (Now - turnThinkStarted) * 1000;
+            turnTiming.RecordThinking(LastThinkWallMilliseconds);
+            LastTurnThinkMilliseconds = turnTiming.ThinkMilliseconds;
+            //追加:計算が最低待ちより長ければ追加で丸ごとの待機をしない。
+            double waitStarted = Now;
+            while (!turnTiming.CanAct(observation.PublicState.TurnNumber, Now))
+            {
+                if (!CanThink(epoch, match, observation.PublicState.StateVersion))
+                {
+                    StopThinking();
+                    yield break;
+                }
+                yield return null;
+            }
+            LastPresentationWaitMilliseconds = (Now - waitStarted) * 1000;
+            turnTiming.RecordWaiting(LastPresentationWaitMilliseconds);
             thinking = null;
             //変更:現在のSessionを検証し、古いAuthorityだけの比較にしない。
             //削除:従来の適用前条件を保存する。
@@ -416,6 +471,11 @@ namespace Waribasi.Presentation
                 }
             }
             Publish();
+            //追加:札と変化した盤面を配信した後から最低表示時間を数える。
+            if (Active && actor == Session.Npc && action is UseCardAction)
+            {
+                turnTiming.CardPublished(Now, minimumCardResultSeconds);
+            }
             return true;
         }
 
@@ -464,6 +524,8 @@ namespace Waribasi.Presentation
             {
                 return false;
             }
+            //追加:停止直前の世代で取得した判断も、正式適用できない状態にする。
+            generation++;
             StopThinking();
             var result = Session.Surrender(Session.Authority.State.StateVersion, Now);
             Publish();

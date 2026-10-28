@@ -92,13 +92,14 @@ namespace Waribasi.MatchFlow
             return true;
         }
 
-        public bool Tick(double now)
+        //変更:ローカルNPCの演出待ちだけ自動スキップを保留できる。通信は従来どおり進む。
+        public bool Tick(double now, bool allowAutomaticSkip = true)
         {
             CheckTime(now);
             //追加:判断する札も通常行動もない待機には時間切れを付けない。
             if (Gate == InputGate.Accepting && MustAutoSkip())
             {
-                return ApplyAutomaticSkip(now);
+                return allowAutomaticSkip && ApplyAutomaticSkip(now);
             }
             if (Gate == InputGate.Accepting && Deadline.HasValue && now >= Deadline.Value)
             {
@@ -109,6 +110,11 @@ namespace Waribasi.MatchFlow
                 //追加:前のカード結果を表示し終えてから専用のスキップ通知を発行する。
                 if (skipAfterPresentation)
                 {
+                    //追加:カード結果の最低表示時間を満たすまで、公開結果と版を維持する。
+                    if (!allowAutomaticSkip)
+                    {
+                        return false;
+                    }
                     skipAfterPresentation = false;
                     return ApplyAutomaticSkip(now);
                 }
@@ -117,7 +123,8 @@ namespace Waribasi.MatchFlow
                 LastResult = null;
                 DeliverySequence++;
                 //追加:次の手番の判断が不要なら、時計を消費せずスキップを確定する。
-                if (MustAutoSkip())
+                //変更:次のNPC手番も最低待ちを満たしてから自動スキップする。
+                if (allowAutomaticSkip && MustAutoSkip())
                 {
                     return ApplyAutomaticSkip(now);
                 }
@@ -140,7 +147,8 @@ namespace Waribasi.MatchFlow
             return Commit(rules.TryInterrupt(State.StateVersion));
         }
 
-        public MatchResponse Submit(PlayerId authenticatedPlayer, MatchRequest request, double now)
+        //変更:ローカル要求内のTickにも、呼出し側の自動スキップ待機条件を反映する。
+        public MatchResponse Submit(PlayerId authenticatedPlayer, MatchRequest request, double now, bool allowAutomaticSkip = true)
         {
             CheckTime(now);
             if (authenticatedPlayer != PlayerId.PlayerA && authenticatedPlayer != PlayerId.PlayerB)
@@ -177,7 +185,8 @@ namespace Waribasi.MatchFlow
 
             lastRequest[seat] = request.RequestId;
             //期限判定と通常要求を分離して待機させない。
-            Tick(now);
+            //変更:待機中の降参要求などで、先に自動スキップして版を変えない。
+            Tick(now, allowAutomaticSkip);
             MatchResponse response;
             if (!request.TryGetAction(out var action))
             {
