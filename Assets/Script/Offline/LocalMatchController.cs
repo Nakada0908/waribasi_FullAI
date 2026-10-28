@@ -205,11 +205,13 @@ namespace Waribasi.Presentation
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            //変更:取消で試合を破棄した後の設定画面への復帰でも読み込み中を解除する。
+            loading = false;
             if (!Active)
             {
                 return;
             }
-            loading = false;
+            //削除:loading = false;
             if (scene.name == "Game")
             {
                 for (int player = 0; player < 2; player++)
